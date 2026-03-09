@@ -3,5 +3,10 @@
     "app/**": {
       "maxDuration": 60
     }
-  }
+  },
+  "rewrites": [
+    { "source": "/api/query", "destination": "https://insightnet-production.up.railway.app/query" },
+    { "source": "/api/ingest", "destination": "https://insightnet-production.up.railway.app/ingest" },
+    { "source": "/api/health", "destination": "https://insightnet-production.up.railway.app/health" }
+  ]
 }
