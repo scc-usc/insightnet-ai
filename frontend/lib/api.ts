@@ -1,6 +1,5 @@
-// Use Next.js rewrites proxy to avoid CORS issues in development
-// The proxy routes are defined in next.config.ts
-const API_BASE = "/api"
+// In production, call the backend directly. In development, use the Next.js rewrite proxy.
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api"
 
 export async function queryStream(
   query: string,
