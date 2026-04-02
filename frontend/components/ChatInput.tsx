@@ -7,13 +7,31 @@ type ChatInputProps = {
   disabled?: boolean
   isStreaming?: boolean
   onStop?: () => void
+  draft?: string
+  onDraftUsed?: () => void
 }
 
-export default function ChatInput({ onSend, disabled, isStreaming, onStop }: ChatInputProps) {
+export default function ChatInput({ onSend, disabled, isStreaming, onStop, draft, onDraftUsed }: ChatInputProps) {
   const [text, setText] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  // Auto-resize textarea to fit content
+  // Accept draft from parent (e.g., when user clicks a capability card)
+  useEffect(() => {
+    if (draft) {
+      setText(draft)
+      onDraftUsed?.()
+      // Focus and place cursor at end
+      setTimeout(() => {
+        const el = textareaRef.current
+        if (el) {
+          el.focus()
+          el.setSelectionRange(draft.length, draft.length)
+        }
+      }, 0)
+    }
+  }, [draft, onDraftUsed])
+
+  // Auto-resize textarea
   useEffect(() => {
     const el = textareaRef.current
     if (!el) return
@@ -21,7 +39,7 @@ export default function ChatInput({ onSend, disabled, isStreaming, onStop }: Cha
     el.style.height = Math.min(el.scrollHeight, 120) + "px"
   }, [text])
 
-  // Re-focus input after streaming ends
+  // Re-focus after streaming ends
   useEffect(() => {
     if (!isStreaming) textareaRef.current?.focus()
   }, [isStreaming])
@@ -40,7 +58,7 @@ export default function ChatInput({ onSend, disabled, isStreaming, onStop }: Cha
   }
 
   return (
-    <div className="px-4 pb-4 pt-2">
+    <div className="px-4 pb-4 pt-2 shrink-0">
       <div className="flex items-end gap-2 bg-white rounded-xl shadow-sm px-3 py-2 border border-white/40">
         <textarea
           ref={textareaRef}
@@ -49,7 +67,7 @@ export default function ChatInput({ onSend, disabled, isStreaming, onStop }: Cha
           onKeyDown={handleKeyDown}
           rows={1}
           className="flex-1 text-sm outline-none text-black bg-transparent resize-none py-1.5 placeholder:text-[#314158]/40"
-          placeholder={isStreaming ? "Waiting for response..." : "Ask about epidemic modeling tools..."}
+          placeholder={isStreaming ? "Waiting for response..." : "Describe what you need..."}
           disabled={disabled}
         />
         {isStreaming ? (
@@ -76,9 +94,6 @@ export default function ChatInput({ onSend, disabled, isStreaming, onStop }: Cha
           </button>
         )}
       </div>
-      <p className="text-[10px] text-[#314158]/40 text-center mt-1.5">
-        Shift+Enter for new line
-      </p>
     </div>
   )
 }

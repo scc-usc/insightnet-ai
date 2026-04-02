@@ -9,10 +9,25 @@ import Image from "next/image"
 
 const STORAGE_KEY = "insightnet-chat"
 
-const WELCOME_CATEGORIES = [
-  { label: "Find tools", query: "Find epidemic modeling tools for COVID-19", icon: "search" },
-  { label: "Compare", query: "Compare agent-based vs compartmental models", icon: "compare" },
-  { label: "Explore code", query: "Show me tools with Python APIs for disease simulation", icon: "code" },
+const CAPABILITIES = [
+  {
+    icon: "\uD83D\uDD0D",
+    title: "Find tools",
+    desc: "Discover modeling tools for any disease or method",
+    hint: "Find tools for ",
+  },
+  {
+    icon: "\u2696\uFE0F",
+    title: "Compare",
+    desc: "See how different frameworks stack up",
+    hint: "Compare ",
+  },
+  {
+    icon: "\uD83D\uDCA1",
+    title: "Explain",
+    desc: "Understand what a tool does and how to use it",
+    hint: "How does ",
+  },
 ]
 
 function loadMessages(): Message[] {
@@ -37,6 +52,7 @@ export default function ChatContainer() {
   const [pipelineStatus, setPipelineStatus] = useState<string>("")
   const abortRef = useRef<AbortController | null>(null)
   const [hydrated, setHydrated] = useState(false)
+  const [draft, setDraft] = useState("")
 
   // Load from localStorage on mount
   useEffect(() => {
@@ -165,23 +181,20 @@ export default function ChatContainer() {
           <div className="text-center">
             <Image src="/logo.png" alt="Logo" width={44} height={44} className="mx-auto mb-2 opacity-80" />
             <p className="text-lg font-semibold text-[#1b183c]">Hey! I'm InsightNet</p>
-            <p className="text-sm text-[#314158]/60 mt-1">
-              I help you find, compare, and explore epidemic modeling tools
+            <p className="text-sm text-[#314158]/60 mt-1 max-w-xs mx-auto">
+              Describe what you're working on and I'll help you find the right epidemic modeling tools
             </p>
           </div>
           <div className="grid grid-cols-3 gap-3 w-full max-w-md">
-            {WELCOME_CATEGORIES.map((cat) => (
+            {CAPABILITIES.map((cap) => (
               <button
-                key={cat.label}
-                onClick={() => sendMessage(cat.query)}
-                className="flex flex-col items-center gap-2 text-center text-xs text-[#314158] bg-white/60 hover:bg-white/80 rounded-xl px-3 py-4 shadow-sm transition border border-white/40"
+                key={cap.title}
+                onClick={() => setDraft(cap.hint)}
+                className="flex flex-col items-center gap-1.5 text-center text-xs text-[#314158] bg-white/60 hover:bg-white/80 rounded-xl px-3 py-3.5 shadow-sm transition border border-white/40"
               >
-                <span className="text-lg">
-                  {cat.icon === "search" && "\uD83D\uDD0D"}
-                  {cat.icon === "compare" && "\u2696\uFE0F"}
-                  {cat.icon === "code" && "\uD83D\uDCBB"}
-                </span>
-                <span className="font-medium">{cat.label}</span>
+                <span className="text-lg">{cap.icon}</span>
+                <span className="font-medium">{cap.title}</span>
+                <span className="text-[10px] text-[#314158]/50 leading-tight">{cap.desc}</span>
               </button>
             ))}
           </div>
@@ -200,6 +213,8 @@ export default function ChatContainer() {
         disabled={isStreaming}
         onStop={stopStreaming}
         isStreaming={isStreaming}
+        draft={draft}
+        onDraftUsed={() => setDraft("")}
       />
     </div>
   )
