@@ -49,8 +49,14 @@ async def log_requests(request: Request, call_next):
 
 # ── Request models ───────────────────────────────────────────────────
 
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
 class QueryRequest(BaseModel):
     query: str
+    history: list[ChatMessage] = []
 
 
 class IngestRequest(BaseModel):
@@ -62,12 +68,15 @@ class IngestRequest(BaseModel):
 
 @app.post("/query")
 async def query_endpoint(req: QueryRequest):
-    stream = run_query_pipeline(req.query)
+    history = [{"role": m.role, "content": m.content} for m in req.history]
 
-    async def generate():
-        for chunk in stream:
-            if hasattr(chunk, "choices") and chunk.choices:
-                delta = chunk.choices[0].delta
+    def generate():
+        for item in run_query_pipeline(req.query, history):
+            if isinstance(item, str):
+                # Status marker
+                yield item
+            elif hasattr(item, "choices") and item.choices:
+                delta = item.choices[0].delta
                 if delta and delta.content:
                     yield delta.content
 

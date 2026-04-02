@@ -1,16 +1,26 @@
-// Use Next.js rewrites proxy to avoid CORS issues in both dev and production.
-// The proxy routes are defined in next.config.ts
+import { Message } from "./types"
+
 const API_BASE = "/api"
+
+type StreamCallbacks = {
+  onChunk: (text: string) => void
+  onStatus: (status: string) => void
+  onFollowups: (suggestions: string[]) => void
+}
 
 export async function queryStream(
   query: string,
-  onChunk: (text: string) => void,
+  history: Message[],
+  callbacks: StreamCallbacks,
   signal?: AbortSignal
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/query`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query }),
+    body: JSON.stringify({
+      query,
+      history: history.map(m => ({ role: m.role, content: m.content })),
+    }),
     signal,
   })
 
@@ -22,10 +32,35 @@ export async function queryStream(
   if (!reader) throw new Error("No response body")
 
   const decoder = new TextDecoder()
+  let buffer = ""
+
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
-    onChunk(decoder.decode(value, { stream: true }))
+
+    buffer += decoder.decode(value, { stream: true })
+
+    // Extract and emit status markers
+    const statusRegex = /\{\{STATUS:(.+?)\}\}/g
+    let match
+    while ((match = statusRegex.exec(buffer)) !== null) {
+      callbacks.onStatus(match[1])
+      buffer = buffer.replace(match[0], "")
+    }
+
+    // Extract followups (appears at the end)
+    const followupMatch = buffer.match(/\{\{FOLLOWUPS:(.+?)\}\}/)
+    if (followupMatch) {
+      const suggestions = followupMatch[1].split("||").map(s => s.trim())
+      callbacks.onFollowups(suggestions)
+      buffer = buffer.replace(followupMatch[0], "")
+    }
+
+    // Emit remaining text
+    if (buffer) {
+      callbacks.onChunk(buffer)
+      buffer = ""
+    }
   }
 }
 
