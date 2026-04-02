@@ -79,16 +79,7 @@ export default function ChatMessage({ message, isLastAssistant, isStreaming, onF
 
   return (
     <div className="flex flex-col items-start gap-2">
-      {/* Tool cards (appear before text) */}
-      {hasTools && (
-        <div className="w-full space-y-2">
-          {message.tools!.map(tool => (
-            <ToolCard key={tool.repo_name} tool={tool} onAsk={onFollowupClick} />
-          ))}
-        </div>
-      )}
-
-      {/* Conversational text */}
+      {/* Conversational text first */}
       {displayContent ? (
         <div className="w-full text-sm text-[#314158] px-1">
           <div className="prose prose-sm max-w-none prose-headings:text-[#1b183c] prose-headings:mt-3 prose-headings:mb-1 prose-p:my-1 prose-a:text-blue-600 prose-a:underline prose-code:bg-gray-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-pre:bg-gray-900 prose-pre:text-gray-100 prose-pre:text-xs prose-pre:rounded-lg prose-table:text-xs prose-li:my-0.5 prose-strong:text-[#1b183c]">
@@ -105,6 +96,15 @@ export default function ChatMessage({ message, isLastAssistant, isStreaming, onF
           <span className="w-1.5 h-1.5 bg-[#314158]/40 rounded-full animate-bounce [animation-delay:300ms]" />
         </div>
       ) : null}
+
+      {/* Tool cards below the text */}
+      {hasTools && (
+        <div className="w-full space-y-1.5">
+          {message.tools!.map(tool => (
+            <ToolCard key={tool.repo_name} tool={tool} onAsk={onFollowupClick} />
+          ))}
+        </div>
+      )}
 
       {/* Follow-up suggestions */}
       {showFollowups && (
