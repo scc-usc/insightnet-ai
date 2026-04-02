@@ -44,7 +44,6 @@ export default function ChatMessage({ message, isLastAssistant, isStreaming, onF
   const showCursor = isLastAssistant && isStreaming && message.content.length > 0
   const showFollowups = !isStreaming && message.followups && message.followups.length > 0
 
-  // Clean followup markers from displayed content and linkify source refs
   const displayContent = linkifySourceRefs(
     message.content.replace(/\{\{FOLLOWUPS:.+?\}\}/g, "").trim()
   )
@@ -66,26 +65,28 @@ export default function ChatMessage({ message, isLastAssistant, isStreaming, onF
     ),
   }
 
-  return (
-    <div className={`flex flex-col ${isUser ? "items-end" : "items-start"}`}>
-      <div
-        className={`px-4 py-2.5 rounded-xl text-sm shadow-sm ${
-          isUser
-            ? "bg-white text-[#314158] rounded-tr-none max-w-[70%]"
-            : "bg-[#B1CBF5]/60 text-[#314158] rounded-tl-none max-w-[85%]"
-        }`}
-      >
-        {isUser ? (
+  if (isUser) {
+    return (
+      <div className="flex justify-end">
+        <div className="px-4 py-2 rounded-xl rounded-tr-none max-w-[75%] text-sm shadow-sm bg-white text-[#314158]">
           <p className="whitespace-pre-wrap">{message.content}</p>
-        ) : displayContent ? (
-          <div className="prose prose-sm max-w-none prose-headings:text-[#1b183c] prose-headings:mt-3 prose-headings:mb-1 prose-p:my-1.5 prose-a:text-blue-600 prose-a:underline prose-code:bg-gray-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-pre:bg-gray-900 prose-pre:text-gray-100 prose-pre:text-xs prose-pre:rounded-lg prose-table:text-xs prose-li:my-0.5 prose-strong:text-[#1b183c]">
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col items-start">
+      <div className="w-full text-sm text-[#314158] px-1">
+        {displayContent ? (
+          <div className="prose prose-sm max-w-none prose-headings:text-[#1b183c] prose-headings:mt-3 prose-headings:mb-1 prose-p:my-1 prose-a:text-blue-600 prose-a:underline prose-code:bg-gray-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-pre:bg-gray-900 prose-pre:text-gray-100 prose-pre:text-xs prose-pre:rounded-lg prose-table:text-xs prose-li:my-0.5 prose-strong:text-[#1b183c]">
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
               {displayContent}
             </ReactMarkdown>
             {showCursor && <span className="inline-block w-0.5 h-4 bg-[#314158]/60 ml-0.5 animate-blink align-text-bottom" />}
           </div>
         ) : (
-          <div className="flex items-center gap-1.5 py-1">
+          <div className="flex items-center gap-1.5 py-1 px-1">
             <span className="w-1.5 h-1.5 bg-[#314158]/40 rounded-full animate-bounce [animation-delay:0ms]" />
             <span className="w-1.5 h-1.5 bg-[#314158]/40 rounded-full animate-bounce [animation-delay:150ms]" />
             <span className="w-1.5 h-1.5 bg-[#314158]/40 rounded-full animate-bounce [animation-delay:300ms]" />
@@ -93,9 +94,8 @@ export default function ChatMessage({ message, isLastAssistant, isStreaming, onF
         )}
       </div>
 
-      {/* Follow-up suggestions */}
       {showFollowups && (
-        <div className="flex flex-wrap gap-1.5 mt-2 max-w-[85%]">
+        <div className="flex flex-wrap gap-1.5 mt-2">
           {message.followups!.map((suggestion) => (
             <button
               key={suggestion}

@@ -1,7 +1,7 @@
 """
 Agent 4 — Recommendation + Synthesis.
 
-Fetches full README for top-5, context-stuffs gpt-5.4, streams response.
+Fetches full README for top results, context-stuffs gpt-5.4, streams response.
 run_query_pipeline(query, history) wraps Agent 1 → 2 → 3 → 4.
 """
 
@@ -11,7 +11,7 @@ from infra import openai_client
 from infra.scraper import get_readme
 from retrieval.query_understanding import understand_query
 from retrieval.retrieval import embed_query, retrieve
-from retrieval.reranker import rerank
+from retrieval.reranker import cosine_rerank, rerank
 
 logger = logging.getLogger(__name__)
 
@@ -21,40 +21,31 @@ STATUS_SEARCHING = "{{STATUS:Searching tools...}}"
 STATUS_RANKING = "{{STATUS:Ranking results...}}"
 STATUS_WRITING = "{{STATUS:Writing response...}}"
 
-SYSTEM_PROMPT = """You are InsightNet, a friendly assistant that helps researchers discover public health epidemic modeling tools and software.
+SYSTEM_PROMPT = """You are InsightNet, a helpful assistant for finding epidemic modeling tools. Talk like a knowledgeable colleague, not a search engine.
 
-When recommending tools, be conversational and helpful — not robotic. Write like you're talking to a colleague:
-- Lead with your top recommendation and why it's a great fit
-- Mention 2-4 other strong options briefly
-- Include a short code snippet only if it genuinely helps the user get started
-- Cite sources as [owner/repo] inline, linking to https://github.com/owner/repo
-- If comparing tools, use a concise table
+CRITICAL RULES:
+- Keep total response under 150 words
+- Lead with your #1 pick in 1-2 natural sentences
+- Mention 1-2 alternatives in one line each if relevant
+- NO numbered lists, NO "BEST PICK" headers, NO bullet-point dumps
+- Only show code if the user asked for it
+- Cite tools as [source: owner/repo]
+- For comparisons: one small table, no extra text
+- Never repeat the question back
 
-Keep responses focused and scannable. Use short paragraphs, not walls of text. Skip the tool if it's only marginally relevant — quality over quantity.
+Write like a text message to a smart colleague — brief, direct, useful.
 
-If the user's intent is "explain_tool", focus on explaining how that specific tool works with practical examples.
+End with:
+{{FOLLOWUPS:suggestion one||suggestion two||suggestion three}}"""
 
-At the very end of your response, add a line break then exactly 3 follow-up suggestions the user might want to ask next, formatted as:
-{{FOLLOWUPS:suggestion one||suggestion two||suggestion three}}
+CHAT_SYSTEM_PROMPT = """You are InsightNet, a friendly assistant for epidemic modeling tools.
 
-Make the suggestions specific and useful based on what you just recommended."""
+- 1-2 sentences max for greetings, thanks, or off-topic
+- Gently redirect off-topic to what you can help with
+- You are NOT a general chatbot
 
-CHAT_SYSTEM_PROMPT = """You are InsightNet, a friendly assistant that helps researchers discover public health epidemic modeling tools.
-
-For general conversation:
-- Be warm, concise, and helpful
-- If the user greets you, greet them back and briefly mention what you can help with
-- If they ask what you can do, explain that you help find, compare, and explain epidemic modeling tools and software
-- If they thank you, acknowledge it naturally
-- If their question is off-topic, gently steer them back to what you can help with
-- Keep responses short — 1-3 sentences for casual messages
-
-At the very end, add follow-up suggestions:
-{{FOLLOWUPS:suggestion one||suggestion two||suggestion three}}
-
-Make the suggestions invite the user to try a tool search.
-
-You are NOT a general-purpose chatbot. You specialize in epidemic modeling tools."""
+End with:
+{{FOLLOWUPS:suggestion one||suggestion two||suggestion three}}"""
 
 
 def _build_history(history: list[dict], limit: int = 6) -> list[dict]:
@@ -79,12 +70,12 @@ def _chat_response(query: str, history: list[dict]):
 def synthesize(query: str, top_results: list, intent: str, history: list[dict]):
     """Context-stuff gpt-5.4 with full READMEs and stream the response."""
     context_parts = []
-    for i, result in enumerate(top_results[:5]):
+    for i, result in enumerate(top_results[:3]):
         readme = get_readme(result.repo_name)
         context_parts.append(
             f"[Tool {i+1}: {result.repo_name}]\n"
-            f"Relevance reason: {result.reason}\n\n"
-            f"{readme[:3000]}"
+            f"Relevance: {result.reason}\n\n"
+            f"{readme[:2000]}"
         )
 
     context = "\n\n---\n\n".join(context_parts)
@@ -124,11 +115,17 @@ def run_query_pipeline(query: str, history: list[dict] | None = None):
     top20 = retrieve(plan, embedding)
     logger.info(f"Retrieved {len(top20)} candidates")
 
-    # Agent 3: Re-ranking (cosine + o3 judge)
+    # Agent 3: Re-ranking
     yield STATUS_RANKING
-    top5 = rerank(query, embedding, top20)
-    logger.info(f"Top 5: {[r.repo_name for r in top5]}")
+    if plan.intent == "find_tool":
+        # Simple find → cosine only (skip expensive o3 judge, ~5x faster)
+        top3 = cosine_rerank(embedding, top20, top_n=3)
+        logger.info(f"Cosine top 3: {[r.repo_name for r in top3]}")
+    else:
+        # Compare/explain → full rerank with o3 judge for quality
+        top3 = rerank(query, embedding, top20)[:3]
+        logger.info(f"Full rerank top 3: {[r.repo_name for r in top3]}")
 
     # Agent 4: Synthesis (streamed)
     yield STATUS_WRITING
-    yield from synthesize(query, top5, plan.intent, history)
+    yield from synthesize(query, top3, plan.intent, history)
