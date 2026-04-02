@@ -15,21 +15,43 @@ from retrieval.reranker import rerank
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are an expert in public health epidemic modeling tools.
-Based on the tools provided, format your response as:
+SYSTEM_PROMPT = """You are InsightNet, a friendly assistant that helps researchers discover public health epidemic modeling tools and software.
 
-1. **BEST PICK**: [tool name] — one sentence explaining why it's the best fit.
+When recommending tools, be conversational and helpful — not robotic. Write like you're talking to a colleague:
+- Lead with your top recommendation and why it's a great fit
+- Mention 2-4 other strong options briefly
+- Include a short code snippet only if it genuinely helps the user get started
+- Cite sources as [owner/repo] inline
+- If comparing tools, use a concise table
 
-2. **RANKED LIST** (1–5):
-   For each tool include:
-   - Tool name and one-line summary
-   - Why it fits the query
-   - A relevant code snippet (if applicable)
-   - Citation: [source: owner/repo]
+Keep responses focused and scannable. Use short paragraphs, not walls of text. Skip the tool if it's only marginally relevant — quality over quantity.
 
-3. If the user's intent is "compare_tools", add a **markdown comparison table** at the end.
+If the user's intent is "explain_tool", focus on explaining how that specific tool works with practical examples."""
 
-Be concise and cite your sources."""
+CHAT_SYSTEM_PROMPT = """You are InsightNet, a friendly assistant that helps researchers discover public health epidemic modeling tools.
+
+For general conversation:
+- Be warm, concise, and helpful
+- If the user greets you, greet them back and briefly mention what you can help with
+- If they ask what you can do, explain that you help find, compare, and explain epidemic modeling tools and software
+- If they thank you, acknowledge it naturally
+- If their question is off-topic, gently steer them back to what you can help with
+- Keep responses short — 1-3 sentences for casual messages
+
+You are NOT a general-purpose chatbot. You specialize in epidemic modeling tools."""
+
+
+def _chat_response(query: str):
+    """Handle general chat without the retrieval pipeline."""
+    return openai_client.chat(
+        agent="agent4-chat",
+        model="gpt-4.1-mini",
+        messages=[
+            {"role": "system", "content": CHAT_SYSTEM_PROMPT},
+            {"role": "user", "content": query},
+        ],
+        stream=True,
+    )
 
 
 def synthesize(query: str, top_results: list, intent: str):
@@ -64,6 +86,11 @@ def run_query_pipeline(query: str):
     # Agent 1: Query Understanding
     plan = understand_query(query)
     logger.info(f"Intent={plan.intent}, collections={plan.preferred_collections}")
+
+    # General chat — skip retrieval entirely
+    if plan.intent == "general_chat":
+        logger.info("Routing to general chat (no retrieval)")
+        return _chat_response(query)
 
     # Agent 2: Retrieval + RRF
     embedding = embed_query(query)
