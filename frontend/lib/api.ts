@@ -1,4 +1,4 @@
-import { Message } from "./types"
+import { Message, ToolCard } from "./types"
 
 const API_BASE = "/api"
 
@@ -6,6 +6,7 @@ type StreamCallbacks = {
   onChunk: (text: string) => void
   onStatus: (status: string) => void
   onFollowups: (suggestions: string[]) => void
+  onTools: (tools: ToolCard[]) => void
 }
 
 export async function queryStream(
@@ -40,7 +41,7 @@ export async function queryStream(
 
     buffer += decoder.decode(value, { stream: true })
 
-    // Extract and emit status markers
+    // Extract status markers
     const statusRegex = /\{\{STATUS:(.+?)\}\}/g
     let match
     while ((match = statusRegex.exec(buffer)) !== null) {
@@ -48,7 +49,17 @@ export async function queryStream(
       buffer = buffer.replace(match[0], "")
     }
 
-    // Extract followups (appears at the end)
+    // Extract tool cards
+    const toolsMatch = buffer.match(/\{\{TOOLS:(.+?)\}\}/)
+    if (toolsMatch) {
+      try {
+        const tools = JSON.parse(toolsMatch[1]) as ToolCard[]
+        callbacks.onTools(tools)
+      } catch { /* malformed JSON — skip */ }
+      buffer = buffer.replace(toolsMatch[0], "")
+    }
+
+    // Extract followups
     const followupMatch = buffer.match(/\{\{FOLLOWUPS:(.+?)\}\}/)
     if (followupMatch) {
       const suggestions = followupMatch[1].split("||").map(s => s.trim())
@@ -56,7 +67,6 @@ export async function queryStream(
       buffer = buffer.replace(followupMatch[0], "")
     }
 
-    // Emit remaining text
     if (buffer) {
       callbacks.onChunk(buffer)
       buffer = ""

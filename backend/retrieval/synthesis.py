@@ -1,13 +1,16 @@
 """
 Agent 4 — Recommendation + Synthesis.
 
-Fetches full README for top results, context-stuffs gpt-5.4, streams response.
+For tool queries: emits structured tool cards + brief conversational intro.
+For general chat: streams a short response directly.
 run_query_pipeline(query, history) wraps Agent 1 → 2 → 3 → 4.
 """
 
+import json
 import logging
 
 from infra import openai_client
+from infra.db import supabase
 from infra.scraper import get_readme
 from retrieval.query_understanding import understand_query
 from retrieval.retrieval import embed_query, retrieve
@@ -21,19 +24,14 @@ STATUS_SEARCHING = "{{STATUS:Searching tools...}}"
 STATUS_RANKING = "{{STATUS:Ranking results...}}"
 STATUS_WRITING = "{{STATUS:Writing response...}}"
 
-SYSTEM_PROMPT = """You are InsightNet, a helpful assistant for finding epidemic modeling tools. Talk like a knowledgeable colleague, not a search engine.
+TOOL_INTRO_PROMPT = """You are InsightNet. The user asked about epidemic modeling tools and you found results (shown as cards separately). Write ONLY a brief 1-2 sentence conversational intro — like texting a colleague.
 
-CRITICAL RULES:
-- Keep total response under 150 words
-- Lead with your #1 pick in 1-2 natural sentences
-- Mention 1-2 alternatives in one line each if relevant
-- NO numbered lists, NO "BEST PICK" headers, NO bullet-point dumps
-- Only show code if the user asked for it
-- Cite tools as [source: owner/repo]
-- For comparisons: one small table, no extra text
-- Never repeat the question back
-
-Write like a text message to a smart colleague — brief, direct, useful.
+Rules:
+- 1-2 sentences MAX. Do NOT describe the tools — the cards handle that.
+- Just say something like "Here's what I found" or "Great question — check these out"
+- For compare intent, add one sentence about the key difference
+- NEVER list tool names, bullet points, or details — cards show all that
+- NEVER repeat the question back
 
 End with:
 {{FOLLOWUPS:suggestion one||suggestion two||suggestion three}}"""
@@ -49,8 +47,41 @@ End with:
 
 
 def _build_history(history: list[dict], limit: int = 6) -> list[dict]:
-    """Take the last N messages from history for context."""
     return history[-limit:] if history else []
+
+
+def _get_tool_profile(repo_name: str) -> dict:
+    """Fetch tool profile from Supabase."""
+    try:
+        result = supabase.table("tool_profiles").select("profile").eq("repo_name", repo_name).limit(1).execute()
+        if result.data and result.data[0].get("profile"):
+            return result.data[0]["profile"]
+    except Exception as e:
+        logger.error(f"Failed to fetch profile for {repo_name}: {e}")
+    return {}
+
+
+def _build_tool_cards(top_results: list) -> list[dict]:
+    """Build structured tool card data from ranked results + Supabase profiles."""
+    cards = []
+    for i, result in enumerate(top_results):
+        profile = _get_tool_profile(result.repo_name)
+        readme = get_readme(result.repo_name)
+
+        cards.append({
+            "rank": i + 1,
+            "repo_name": result.repo_name,
+            "tool_name": profile.get("tool_name", result.repo_name.split("/")[-1]),
+            "one_line": profile.get("one_line", result.chunk_text[:120]),
+            "reason": result.reason or "",
+            "tags": profile.get("tags", [])[:4],
+            "difficulty": profile.get("difficulty", ""),
+            "use_cases": profile.get("use_cases", [])[:3],
+            "github_url": f"https://github.com/{result.repo_name}",
+            "readme_preview": readme[:300] if readme else "",
+            "score": round(result.score, 3),
+        })
+    return cards
 
 
 def _chat_response(query: str, history: list[dict]):
@@ -67,34 +98,22 @@ def _chat_response(query: str, history: list[dict]):
     )
 
 
-def synthesize(query: str, top_results: list, intent: str, history: list[dict]):
-    """Context-stuff gpt-5.4 with full READMEs and stream the response."""
-    context_parts = []
-    for i, result in enumerate(top_results[:3]):
-        readme = get_readme(result.repo_name)
-        context_parts.append(
-            f"[Tool {i+1}: {result.repo_name}]\n"
-            f"Relevance: {result.reason}\n\n"
-            f"{readme[:2000]}"
-        )
-
-    context = "\n\n---\n\n".join(context_parts)
-    user_msg = f"Query: {query}\nIntent: {intent}\n\n{context}"
-
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+def _tool_intro(query: str, intent: str, tool_names: list[str], history: list[dict]):
+    """Generate a brief 1-2 sentence intro for tool results."""
+    messages = [{"role": "system", "content": TOOL_INTRO_PROMPT}]
     messages.extend(_build_history(history))
-    messages.append({"role": "user", "content": user_msg})
+    messages.append({"role": "user", "content": f"Query: {query}\nIntent: {intent}\nTools found: {', '.join(tool_names)}"})
 
     return openai_client.chat(
-        agent="agent4",
-        model="gpt-5.4",
+        agent="agent4-intro",
+        model="gpt-4.1-mini",
         messages=messages,
         stream=True,
     )
 
 
 def run_query_pipeline(query: str, history: list[dict] | None = None):
-    """Full pipeline: Agent 1 → 2 → 3 → 4. Yields status markers then streams response."""
+    """Full pipeline: Agent 1 → 2 → 3 → 4. Yields status markers, tool cards, then streams intro."""
     history = history or []
     logger.info(f"Query pipeline start: {query!r}")
 
@@ -118,14 +137,16 @@ def run_query_pipeline(query: str, history: list[dict] | None = None):
     # Agent 3: Re-ranking
     yield STATUS_RANKING
     if plan.intent == "find_tool":
-        # Simple find → cosine only (skip expensive o3 judge, ~5x faster)
         top3 = cosine_rerank(embedding, top20, top_n=3)
-        logger.info(f"Cosine top 3: {[r.repo_name for r in top3]}")
     else:
-        # Compare/explain → full rerank with o3 judge for quality
         top3 = rerank(query, embedding, top20)[:3]
-        logger.info(f"Full rerank top 3: {[r.repo_name for r in top3]}")
+    logger.info(f"Top results: {[r.repo_name for r in top3]}")
 
-    # Agent 4: Synthesis (streamed)
+    # Build and emit tool cards (instant, no LLM needed)
     yield STATUS_WRITING
-    yield from synthesize(query, top3, plan.intent, history)
+    cards = _build_tool_cards(top3)
+    yield "{{TOOLS:" + json.dumps(cards) + "}}"
+
+    # Stream brief conversational intro
+    tool_names = [c["tool_name"] for c in cards]
+    yield from _tool_intro(query, plan.intent, tool_names, history)

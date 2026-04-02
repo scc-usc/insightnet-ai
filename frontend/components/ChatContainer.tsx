@@ -105,6 +105,15 @@ export default function ChatContainer() {
               )
             )
           },
+          onTools: (tools) => {
+            setMessages(prev =>
+              prev.map(m =>
+                m.id === assistantId
+                  ? { ...m, tools }
+                  : m
+              )
+            )
+          },
         },
         controller.signal
       )
