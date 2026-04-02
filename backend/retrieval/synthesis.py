@@ -2,6 +2,7 @@
 Agent 4 — Recommendation + Synthesis.
 
 For tool queries: emits structured tool cards + brief conversational intro.
+For explain queries: gives a detailed explanation without re-searching.
 For general chat: streams a short response directly.
 run_query_pipeline(query, history) wraps Agent 1 → 2 → 3 → 4.
 """
@@ -41,6 +42,17 @@ CHAT_SYSTEM_PROMPT = """You are InsightNet, a friendly assistant for epidemic mo
 - 1-2 sentences max for greetings, thanks, or off-topic
 - Gently redirect off-topic to what you can help with
 - You are NOT a general chatbot
+
+End with:
+{{FOLLOWUPS:suggestion one||suggestion two||suggestion three}}"""
+
+EXPLAIN_PROMPT = """You are InsightNet. The user wants to know more about a specific epidemic modeling tool. Using the README and profile provided, give a helpful explanation.
+
+Rules:
+- 3-5 sentences, conversational tone
+- Focus on what the tool does, who it's for, and how to get started
+- Include one short code/install example if relevant
+- Cite as [source: owner/repo]
 
 End with:
 {{FOLLOWUPS:suggestion one||suggestion two||suggestion three}}"""
@@ -98,6 +110,61 @@ def _chat_response(query: str, history: list[dict]):
     )
 
 
+def _explain_tool(query: str, history: list[dict]):
+    """Explain a specific tool using its README and profile, without re-searching."""
+    # Try to find the tool name from query + history context
+    repo_name = _extract_repo_from_context(query, history)
+    if not repo_name:
+        # Fallback: do a lightweight search
+        return None
+
+    profile = _get_tool_profile(repo_name)
+    readme = get_readme(repo_name)
+
+    context = f"Tool: {repo_name}\n"
+    if profile:
+        context += f"Profile: {json.dumps(profile)}\n"
+    if readme:
+        context += f"README:\n{readme[:3000]}\n"
+
+    messages = [{"role": "system", "content": EXPLAIN_PROMPT}]
+    messages.extend(_build_history(history))
+    messages.append({"role": "user", "content": f"{query}\n\n{context}"})
+
+    return openai_client.chat(
+        agent="agent4-explain",
+        model="gpt-4.1-mini",
+        messages=messages,
+        stream=True,
+    )
+
+
+def _extract_repo_from_context(query: str, history: list[dict]) -> str | None:
+    """Try to find a repo name mentioned in recent messages."""
+    # Check recent assistant messages for tool card data or repo references
+    all_text = query.lower()
+    for msg in reversed(history[-6:]):
+        all_text += " " + msg.get("content", "").lower()
+
+    # Search Supabase for matching tool names
+    try:
+        result = supabase.table("tool_profiles").select("repo_name,profile").execute()
+        if result.data:
+            for row in result.data:
+                profile = row.get("profile", {})
+                tool_name = profile.get("tool_name", "").lower()
+                repo = row["repo_name"].lower()
+                repo_short = repo.split("/")[-1].lower()
+
+                if tool_name and tool_name in all_text:
+                    return row["repo_name"]
+                if repo_short in all_text:
+                    return row["repo_name"]
+    except Exception:
+        pass
+    return None
+
+
 def _tool_intro(query: str, intent: str, tool_names: list[str], history: list[dict]):
     """Generate a brief 1-2 sentence intro for tool results."""
     messages = [{"role": "system", "content": TOOL_INTRO_PROMPT}]
@@ -117,16 +184,27 @@ def run_query_pipeline(query: str, history: list[dict] | None = None):
     history = history or []
     logger.info(f"Query pipeline start: {query!r}")
 
-    # Agent 1: Query Understanding
+    # Agent 1: Query Understanding (with conversation history for context)
     yield STATUS_UNDERSTANDING
-    plan = understand_query(query)
-    logger.info(f"Intent={plan.intent}, collections={plan.preferred_collections}")
+    plan = understand_query(query, history)
+    logger.info(f"Intent={plan.intent}, keywords={plan.keywords}, collections={plan.preferred_collections}")
 
     # General chat — skip retrieval entirely
     if plan.intent == "general_chat":
         logger.info("Routing to general chat (no retrieval)")
         yield from _chat_response(query, history)
         return
+
+    # Explain tool — try to answer from existing data without re-searching
+    if plan.intent == "explain_tool":
+        logger.info("Routing to explain tool")
+        yield STATUS_WRITING
+        explain_stream = _explain_tool(query, history)
+        if explain_stream is not None:
+            yield from explain_stream
+            return
+        # Fallback: if we couldn't find the tool, do a regular search
+        logger.info("Could not identify tool, falling back to search")
 
     # Agent 2: Retrieval + RRF
     yield STATUS_SEARCHING
