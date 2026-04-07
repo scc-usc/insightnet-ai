@@ -24,11 +24,12 @@ class Chunk:
 
 @dataclass
 class QueryPlan:
-    intent: str           # "find_tool" | "compare_tools" | "explain_tool"
+    intent: str           # "find_tool" | "compare_tools" | "explain_tool" | "discuss_results" | "followup_tool" | "general_chat"
     domain: str = ""
     keywords: list = field(default_factory=list)
     preferred_collections: list = field(default_factory=lambda: ["tool_profiles", "readme_chunks", "code_chunks"])
     filters: dict = field(default_factory=dict)
+    referenced_tools: list = field(default_factory=list)
 
 
 @dataclass

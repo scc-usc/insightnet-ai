@@ -93,7 +93,14 @@ export default function ChatContainer() {
 
     const controller = new AbortController()
     abortRef.current = controller
-    const history = [...messages, userMsg].filter(m => m.content.length > 0)
+    const history = [...messages, userMsg]
+      .filter(m => m.content.length > 0)
+      .map(m => ({
+        ...m,
+        content: m.tools && m.tools.length > 0
+          ? `${m.content}\n\n[Previously shown tools:\n${m.tools.map((t, i) => `${i + 1}. ${t.tool_name} (${t.repo_name}) — ${t.one_line}`).join("\n")}]`
+          : m.content,
+      }))
 
     try {
       await queryStream(text, history, {

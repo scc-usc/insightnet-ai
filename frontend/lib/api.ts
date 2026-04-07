@@ -41,12 +41,12 @@ export async function queryStream(
 
     buffer += decoder.decode(value, { stream: true })
 
-    // Extract status markers
-    const statusRegex = /\{\{STATUS:(.+?)\}\}/g
-    let match
-    while ((match = statusRegex.exec(buffer)) !== null) {
-      callbacks.onStatus(match[1])
-      buffer = buffer.replace(match[0], "")
+    // Extract all markers before sending any text
+    // Status markers
+    let statusMatch
+    while ((statusMatch = buffer.match(/\{\{STATUS:(.+?)\}\}/)) !== null) {
+      callbacks.onStatus(statusMatch[1])
+      buffer = buffer.replace(statusMatch[0], "")
     }
 
     // Extract tool cards
