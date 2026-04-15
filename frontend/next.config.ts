@@ -8,6 +8,7 @@ const nextConfig: NextConfig = {
       { source: "/api/query", destination: `${apiUrl}/query` },
       { source: "/api/ingest", destination: `${apiUrl}/ingest` },
       { source: "/api/health", destination: `${apiUrl}/health` },
+      { source: "/api/models", destination: `${apiUrl}/models` },
     ];
   },
 };

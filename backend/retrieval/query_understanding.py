@@ -56,7 +56,7 @@ Examples (no tools previously shown):
 - "I have COVID data, how do I use it?" → find_tool"""
 
 
-def understand_query(query: str, history: list[dict] | None = None) -> QueryPlan:
+def understand_query(query: str, history: list[dict] | None = None, model: str | None = None) -> QueryPlan:
     history = history or []
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -67,10 +67,11 @@ def understand_query(query: str, history: list[dict] | None = None) -> QueryPlan
 
     messages.append({"role": "user", "content": query})
 
+    # Query understanding is an internal classification task — always use the
+    # default model (which reliably supports json_mode), not the user's pick.
     try:
-        raw = openai_client.chat(
+        raw = openai_client.chat_router(
             agent="agent1",
-            model="gpt-4.1-mini",
             messages=messages,
             json_mode=True,
         )
@@ -84,5 +85,9 @@ def understand_query(query: str, history: list[dict] | None = None) -> QueryPlan
             referenced_tools=data.get("referenced_tools", []),
         )
     except Exception as e:
-        logger.error(f"Query understanding failed: {e}")
+        logger.warning(f"Query understanding failed: {e}")
+        # Simple heuristic fallback for common patterns
+        q = query.strip().lower()
+        if q in ("hi", "hello", "hey", "thanks", "thank you", "ok", "okay", "bye", "goodbye"):
+            return QueryPlan(intent="general_chat", keywords=[])
         return QueryPlan(intent="find_tool", keywords=query.split()[:5])

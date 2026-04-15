@@ -1,22 +1,62 @@
 "use client"
 
 import ChatMessage from "./ChatMessage"
+import ErrorBoundary from "./ErrorBoundary"
 import { Message } from "@/lib/types"
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 
 type MessageListProps = {
   messages: Message[]
   isStreaming?: boolean
   pipelineStatus?: string
   onFollowupClick?: (text: string) => void
+  expandedTools?: Set<string>
+  onToggleTool?: (messageId: string, repoName: string) => void
 }
 
-export default function MessageList({ messages, isStreaming, pipelineStatus, onFollowupClick }: MessageListProps) {
+// Scroll is considered "near bottom" if the user is within this many pixels
+// of the end of the conversation — used to decide whether to auto-follow the stream.
+const NEAR_BOTTOM_THRESHOLD_PX = 120
+
+export default function MessageList({ messages, isStreaming, pipelineStatus, onFollowupClick, expandedTools, onToggleTool }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [stickToBottom, setStickToBottom] = useState(true)
+  const prevLenRef = useRef(messages.length)
+  const prevStreamingRef = useRef(isStreaming)
+
+  // Track whether the user is currently near the bottom of the scroll container.
+  // If they scroll up to re-read, we pause auto-scroll so we don't yank them back.
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const handleScroll = () => {
+      const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+      setStickToBottom(distanceFromBottom < NEAR_BOTTOM_THRESHOLD_PX)
+    }
+    el.addEventListener("scroll", handleScroll, { passive: true })
+    return () => el.removeEventListener("scroll", handleScroll)
+  }, [])
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages, pipelineStatus])
+    if (messages.length === 0) {
+      containerRef.current?.scrollTo({ top: 0 })
+      prevLenRef.current = 0
+      return
+    }
+
+    const newMessage = messages.length > prevLenRef.current
+    const justFinishedStreaming = prevStreamingRef.current && !isStreaming
+    prevLenRef.current = messages.length
+    prevStreamingRef.current = !!isStreaming
+
+    if (!stickToBottom) return
+    // During streaming: jump instantly so there's no animation-per-token jank.
+    // Smooth-scroll only for the one-shot events: a new message arriving, or streaming ending.
+    const behavior: ScrollBehavior = (isStreaming && !newMessage) ? "auto" : "smooth"
+    bottomRef.current?.scrollIntoView({ behavior })
+    void justFinishedStreaming // read so the ref update above isn't flagged unused
+  }, [messages, pipelineStatus, isStreaming, stickToBottom])
 
   const lastAssistantIdx = messages.reduce((acc, m, i) => (m.role === "assistant" ? i : acc), -1)
 
@@ -30,21 +70,25 @@ export default function MessageList({ messages, isStreaming, pipelineStatus, onF
   }
 
   return (
-    <div className="flex-1 overflow-y-auto scrollbar-thin">
-      <div className="max-w-3xl mx-auto w-full px-6 py-4">
+    <div ref={containerRef} className="flex-1 overflow-y-auto scrollbar-thin">
+      <div className="max-w-3xl mx-auto w-full px-4 sm:px-6 py-4">
         {exchanges.map((exchange, exIdx) => (
           <div key={exchange.user.id}>
             {exIdx > 0 && <div className="border-t border-[#B1CBF5]/10 my-6" />}
             <div className="space-y-3">
-              <ChatMessage message={exchange.user} />
-              {exchange.assistant && (
-                <ChatMessage
-                  message={exchange.assistant}
-                  isLastAssistant={messages.indexOf(exchange.assistant) === lastAssistantIdx}
-                  isStreaming={isStreaming}
-                  onFollowupClick={onFollowupClick}
-                />
-              )}
+              <ErrorBoundary fallback={<div className="text-xs text-red-500 py-2">Failed to render this message.</div>}>
+                <ChatMessage message={exchange.user} />
+                {exchange.assistant && (
+                  <ChatMessage
+                    message={exchange.assistant}
+                    isLastAssistant={messages.indexOf(exchange.assistant) === lastAssistantIdx}
+                    isStreaming={isStreaming}
+                    onFollowupClick={onFollowupClick}
+                    expandedTools={expandedTools}
+                    onToggleTool={onToggleTool}
+                  />
+                )}
+              </ErrorBoundary>
             </div>
           </div>
         ))}

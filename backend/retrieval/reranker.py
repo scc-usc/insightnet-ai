@@ -100,9 +100,8 @@ def llm_judge(query: str, candidates: list[RankedResult]) -> list[RankedResult]:
     )
 
     try:
-        raw = openai_client.chat(
+        raw = openai_client.chat_router(
             agent="agent3",
-            model="o3",
             messages=[
                 {"role": "system", "content": "Score each candidate 1-10 for relevance to the query. Return a JSON array of {id, score, reason}."},
                 {"role": "user", "content": f"Query: {query}\n\nCandidates:\n{numbered}"},

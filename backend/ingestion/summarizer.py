@@ -44,9 +44,8 @@ def summarize_repo(repo_name: str, readme_text: str, file_tree: list[str]) -> di
     profile = {}
     for attempt in range(2):
         try:
-            raw = openai_client.chat(
+            raw = openai_client.chat_router(
                 agent="agent0",
-                model="gpt-4.1-mini",
                 messages=[
                     {"role": "system", "content": SUMMARIZE_SYSTEM},
                     {"role": "user", "content": user_msg},

@@ -43,7 +43,13 @@ Adapt naturally: a simple question gets a simple answer, a complex question gets
 FOLLOWUPS_INSTRUCTION = """
 End every response with exactly this format (three suggestions separated by ||):
 {{FOLLOWUPS:suggestion one||suggestion two||suggestion three}}
-Make the suggestions specific and relevant to what was just discussed — never generic."""
+Make the suggestions specific and relevant to what was just discussed — never generic.
+
+Do NOT write things like "If you want, I can..." or "Let me know if you'd like..." in the prose.
+The {{FOLLOWUPS:}} chips handle that — suggesting next steps twice is redundant."""
+
+# Same instruction but with braces escaped for str.format() templates
+_FOLLOWUPS_INSTRUCTION_ESCAPED = FOLLOWUPS_INSTRUCTION.replace("{", "{{").replace("}", "}}")
 
 TOOL_INTRO_PROMPT = f"""You are InsightNet, an expert assistant for epidemic modeling tools. You found tools matching the user's query (shown as cards separately). Write a brief intro that connects the results to the user's specific need.
 
@@ -55,51 +61,55 @@ Rules:
 - NEVER repeat the question back
 {FOLLOWUPS_INSTRUCTION}"""
 
-CHAT_SYSTEM_PROMPT = f"""You are InsightNet, an expert assistant for epidemic modeling tools and methods.
+CHAT_SYSTEM_PROMPT = f"""You are InsightNet, an expert on epidemic modeling tools and methods. You're a colleague in the lab — warm, direct, and brief.
 
-You help with:
-- Epidemic modeling concepts (SIR, SEIR, agent-based, compartmental, network models, etc.)
-- Choosing the right approach for a user's research
-- Domain questions about epidemiology, public health modeling, and data analysis
-- Methodology guidance, not just tool selection
+CRITICAL — match response length to the message:
+- Greetings ("hi", "hello", "hey"): reply in ONE friendly sentence. No bullet menus. No capability tour. Example: "Hey! What are you working on?"
+- Thanks / acknowledgments ("thanks", "got it", "ok"): one short sentence. Don't restart a tour.
+- Off-topic ("what's the weather?"): one sentence redirecting back to what you do help with. No bullet list of alternatives.
+- Actual domain questions (SIR vs SEIR, R₀, calibration, etc.): answer the question. Use a short paragraph by default — structure (bullets, headers, tables) only when it genuinely helps. A conversational answer beats a bulleted outline.
 
-Be conversational and knowledgeable — like a helpful colleague in the lab. When a question could benefit from a tool search, suggest it naturally.
-
-If truly off-topic (weather, cooking, etc.), briefly redirect to what you can help with.
-{FORMATTING_INSTRUCTIONS}
+Never pad. Never list your capabilities unprompted. Never start with "Great question!" or similar filler. If a question could benefit from a tool search, say so in one line — don't preemptively list tool categories.
 {FOLLOWUPS_INSTRUCTION}"""
 
-EXPLAIN_PROMPT = f"""You are InsightNet. The user wants to know more about an epidemic modeling tool.
+EXPLAIN_PROMPT = f"""You are InsightNet. The user wants to know about an epidemic modeling tool.
 
-Use the tool's profile and README data provided to give a thorough, helpful explanation. Cover what the user needs to understand — what it does, who it's for, how to get started, key features, limitations.
+Answer the question the user actually asked, using the profile and README provided. Stay under ~200 words unless the question genuinely requires more depth.
 
-Cite the source as [source: owner/repo].
+Do NOT produce a structured overview with every section (what/who/how/features/limitations). Pick only the angles relevant to the question. For open-ended requests like "tell me more", give a focused 3-4 paragraph overview — NOT a spec sheet with 9 headers.
 
-If the user has already seen an explanation and is asking a follow-up question, answer their specific question directly — don't repeat information they already have.
-{FORMATTING_INSTRUCTIONS}
+Mention the repo name (owner/repo) once near the start. Do NOT cite it after every bullet or sentence — one mention is enough.
+
+If the user is asking a follow-up to an earlier explanation, answer the specific question directly. Don't repeat what they already know.
 {FOLLOWUPS_INSTRUCTION}"""
 
 _DISCUSS_TEMPLATE = """You are InsightNet. The user is asking about tools you previously showed them.
 
-Use the tool profiles below to give a thoughtful, specific answer. Reference tools by name. Give clear recommendations with reasoning based on what the user needs. If you don't have enough info about their use case, ask a clarifying question.
+Use the tool profiles below to give ONE clear recommendation with reasoning. Don't hedge with multiple overlapping recommendations ("my pick", "default choice", "if I had to pick one") — that's the same answer three times.
+
+Structure:
+1. One sentence naming your recommendation and why.
+2. A brief comparison (2-4 sentences, or a small table if there are 3+ meaningful dimensions) to back it up.
+3. If you genuinely need more info about their use case, ask ONE clarifying question — not a menu of three.
+
+Reference tools by name. Keep the total response under ~150 words unless a table is truly needed.
 
 Previously shown tool profiles:
 {tool_context}
-""" + FORMATTING_INSTRUCTIONS + """
-End every response with exactly this format (three suggestions separated by ||):
-{{{{FOLLOWUPS:suggestion one||suggestion two||suggestion three}}}}
-Make the suggestions specific and relevant to what was just discussed — never generic."""
+""" + _FOLLOWUPS_INSTRUCTION_ESCAPED
 
 _FOLLOWUP_TEMPLATE = """You are InsightNet. The user is asking a specific question about an epidemic modeling tool.
 
-Use the tool's profile and README below to answer their question directly with specific, accurate information from the data. Don't give generic overviews unless that's what was asked.
+Answer the exact question, nothing more. Match response length to the question:
+- Yes/no questions: lead with "Yes" or "No", then 1-2 sentences of supporting detail from the profile/README. Do NOT add "What it supports / What is not documented" bullet lists.
+- "How do I..." questions: give the concrete steps from the README, no preamble.
+- "What is..." questions: one focused paragraph.
+
+Never pad with sections the user didn't ask about. Cite the repo name once if relevant, not after every sentence.
 
 Tool context:
 {tool_context}
-""" + FORMATTING_INSTRUCTIONS + """
-End every response with exactly this format (three suggestions separated by ||):
-{{{{FOLLOWUPS:suggestion one||suggestion two||suggestion three}}}}
-Make the suggestions specific and relevant to what was just discussed — never generic."""
+""" + _FOLLOWUPS_INSTRUCTION_ESCAPED
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
@@ -212,21 +222,21 @@ def _build_tool_context(repo_names: list[str]) -> str:
 
 # ── Response handlers ───────────────────────────────────────────────
 
-def _chat_response(query: str, history: list[dict]):
+def _chat_response(query: str, history: list[dict], model: str | None = None):
     """Handle general chat with conversational domain knowledge."""
     messages = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]
     messages.extend(_build_history(history))
     messages.append({"role": "user", "content": query})
 
-    return openai_client.chat(
+    return openai_client.chat_router(
         agent="agent4-chat",
-        model="gpt-4.1-mini",
         messages=messages,
+        model=model,
         stream=True,
     )
 
 
-def _explain_tool(query: str, history: list[dict], referenced_tools: list[str] | None = None):
+def _explain_tool(query: str, history: list[dict], referenced_tools: list[str] | None = None, model: str | None = None):
     """Explain a specific tool using its README and profile, without re-searching."""
     repo_name = _extract_repo_from_context(query, history, referenced_tools)
     if not repo_name:
@@ -238,17 +248,16 @@ def _explain_tool(query: str, history: list[dict], referenced_tools: list[str] |
     messages.extend(_build_history(history))
     messages.append({"role": "user", "content": f"{query}\n\n{context}"})
 
-    return openai_client.chat(
+    return openai_client.chat_router(
         agent="agent4-explain",
-        model="gpt-4.1-mini",
         messages=messages,
+        model=model,
         stream=True,
     )
 
 
-def _discuss_results(query: str, history: list[dict], referenced_tools: list[str] | None = None):
+def _discuss_results(query: str, history: list[dict], referenced_tools: list[str] | None = None, model: str | None = None):
     """Answer questions about previously shown tools using conversation context."""
-    # Get tools from referenced_tools or history
     repo_names = referenced_tools if referenced_tools else _extract_shown_tools_from_history(history)
 
     if not repo_names:
@@ -261,15 +270,15 @@ def _discuss_results(query: str, history: list[dict], referenced_tools: list[str
     messages.extend(_build_history(history))
     messages.append({"role": "user", "content": query})
 
-    return openai_client.chat(
+    return openai_client.chat_router(
         agent="agent4-discuss",
-        model="gpt-4.1-mini",
         messages=messages,
+        model=model,
         stream=True,
     )
 
 
-def _followup_tool(query: str, history: list[dict], referenced_tools: list[str] | None = None):
+def _followup_tool(query: str, history: list[dict], referenced_tools: list[str] | None = None, model: str | None = None):
     """Answer a specific question about a tool using its full context."""
     repo_name = _extract_repo_from_context(query, history, referenced_tools)
     if not repo_name:
@@ -282,38 +291,38 @@ def _followup_tool(query: str, history: list[dict], referenced_tools: list[str] 
     messages.extend(_build_history(history))
     messages.append({"role": "user", "content": query})
 
-    return openai_client.chat(
+    return openai_client.chat_router(
         agent="agent4-followup",
-        model="gpt-4.1-mini",
         messages=messages,
+        model=model,
         stream=True,
     )
 
 
-def _tool_intro(query: str, intent: str, tool_names: list[str], history: list[dict]):
+def _tool_intro(query: str, intent: str, tool_names: list[str], history: list[dict], model: str | None = None):
     """Generate a brief 1-2 sentence intro for tool results."""
     messages = [{"role": "system", "content": TOOL_INTRO_PROMPT}]
     messages.extend(_build_history(history))
     messages.append({"role": "user", "content": f"Query: {query}\nIntent: {intent}\nTools found: {', '.join(tool_names)}"})
 
-    return openai_client.chat(
+    return openai_client.chat_router(
         agent="agent4-intro",
-        model="gpt-4.1-mini",
         messages=messages,
+        model=model,
         stream=True,
     )
 
 
 # ── Main pipeline ──────────────────────────────────────────────────
 
-def run_query_pipeline(query: str, history: list[dict] | None = None):
+def run_query_pipeline(query: str, history: list[dict] | None = None, model: str | None = None):
     """Full pipeline: Agent 1 → route by intent → respond. Yields status markers, tool cards, then streams."""
     history = history or []
-    logger.info(f"Query pipeline start: {query!r}")
+    logger.info(f"Query pipeline start: {query!r} model={model}")
 
     # Agent 1: Query Understanding (with conversation history for context)
     yield STATUS_UNDERSTANDING
-    plan = understand_query(query, history)
+    plan = understand_query(query, history, model=model)
     logger.info(f"Intent={plan.intent}, keywords={plan.keywords}, referenced_tools={plan.referenced_tools}")
 
     # ── Route by intent ─────────────────────────────────────────────
@@ -321,14 +330,14 @@ def run_query_pipeline(query: str, history: list[dict] | None = None):
     # General chat — skip retrieval entirely
     if plan.intent == "general_chat":
         logger.info("Routing to general chat (no retrieval)")
-        yield from _chat_response(query, history)
+        yield from _chat_response(query, history, model=model)
         return
 
     # Discuss results — answer about previously shown tools
     if plan.intent == "discuss_results":
         logger.info("Routing to discuss results (no new search)")
         yield STATUS_WRITING
-        stream = _discuss_results(query, history, plan.referenced_tools)
+        stream = _discuss_results(query, history, plan.referenced_tools, model=model)
         if stream is not None:
             yield from stream
             return
@@ -338,7 +347,7 @@ def run_query_pipeline(query: str, history: list[dict] | None = None):
     if plan.intent == "followup_tool":
         logger.info("Routing to followup tool")
         yield STATUS_WRITING
-        stream = _followup_tool(query, history, plan.referenced_tools)
+        stream = _followup_tool(query, history, plan.referenced_tools, model=model)
         if stream is not None:
             yield from stream
             return
@@ -348,7 +357,7 @@ def run_query_pipeline(query: str, history: list[dict] | None = None):
     if plan.intent == "explain_tool":
         logger.info("Routing to explain tool")
         yield STATUS_WRITING
-        explain_stream = _explain_tool(query, history, plan.referenced_tools)
+        explain_stream = _explain_tool(query, history, plan.referenced_tools, model=model)
         if explain_stream is not None:
             yield from explain_stream
             return
@@ -384,4 +393,4 @@ def run_query_pipeline(query: str, history: list[dict] | None = None):
 
     # Stream brief conversational intro
     tool_names = [c["tool_name"] for c in cards]
-    yield from _tool_intro(query, plan.intent, tool_names, history)
+    yield from _tool_intro(query, plan.intent, tool_names, history, model=model)

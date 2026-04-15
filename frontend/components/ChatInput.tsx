@@ -61,12 +61,23 @@ export default function ChatInput({ onSend, disabled, isStreaming, onStop, draft
           disabled={disabled}
         />
         {isStreaming ? (
-          <button onClick={onStop} className="shrink-0 w-9 h-9 flex items-center justify-center bg-red-500 text-white rounded-xl hover:bg-red-600 transition" title="Stop">
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><rect width="12" height="12" rx="2" /></svg>
+          <button
+            onClick={onStop}
+            aria-label="Stop generating"
+            title="Stop generating"
+            className="shrink-0 w-9 h-9 flex items-center justify-center bg-red-500 text-white rounded-xl hover:bg-red-600 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><rect width="12" height="12" rx="2" /></svg>
           </button>
         ) : (
-          <button onClick={handleSend} disabled={disabled || !text.trim()} className="shrink-0 w-9 h-9 flex items-center justify-center bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition disabled:opacity-25" title="Send">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <button
+            onClick={handleSend}
+            disabled={disabled || !text.trim()}
+            aria-label="Send message"
+            title="Send message"
+            className="shrink-0 w-9 h-9 flex items-center justify-center bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition disabled:opacity-25 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
             </svg>
           </button>

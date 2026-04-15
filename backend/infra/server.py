@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from infra.db import supabase, OPENAI_API_KEY, GITHUB_WEBHOOK_SECRET, get_chroma_client
+from infra.db import supabase, OPENROUTER_API_KEY, GITHUB_WEBHOOK_SECRET, get_chroma_client
 from infra.scraper import scrape_repo, save_repo, load_repo_list
 from infra.updater import reingest_repo
 from ingestion.parser import parse_readme, parse_code
@@ -57,6 +57,7 @@ class ChatMessage(BaseModel):
 class QueryRequest(BaseModel):
     query: str
     history: list[ChatMessage] = []
+    model: str | None = None
 
 
 class IngestRequest(BaseModel):
@@ -71,7 +72,7 @@ async def query_endpoint(req: QueryRequest):
     history = [{"role": m.role, "content": m.content} for m in req.history]
 
     def generate():
-        for item in run_query_pipeline(req.query, history):
+        for item in run_query_pipeline(req.query, history, model=req.model):
             if isinstance(item, str):
                 # Status marker
                 yield item
@@ -143,6 +144,12 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks):
     return {"status": "queued", "repo": repo_name}
 
 
+@app.get("/models")
+async def models_endpoint():
+    from infra.openai_client import list_models
+    return list_models()
+
+
 @app.get("/health")
 async def health():
     status = {}
@@ -159,5 +166,5 @@ async def health():
     except Exception:
         status["chromadb"] = "error"
 
-    status["openai"] = "ok" if OPENAI_API_KEY else "missing"
+    status["openrouter"] = "ok" if OPENROUTER_API_KEY else "missing"
     return status

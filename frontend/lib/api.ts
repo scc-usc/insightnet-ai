@@ -13,7 +13,8 @@ export async function queryStream(
   query: string,
   history: Message[],
   callbacks: StreamCallbacks,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  model?: string
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/query`, {
     method: "POST",
@@ -21,6 +22,7 @@ export async function queryStream(
     body: JSON.stringify({
       query,
       history: history.map(m => ({ role: m.role, content: m.content })),
+      model: model || undefined,
     }),
     signal,
   })
@@ -35,42 +37,73 @@ export async function queryStream(
   const decoder = new TextDecoder()
   let buffer = ""
 
+  const processBuffer = (flush: boolean) => {
+    // Walk the buffer looking for complete markers. Emit plain text up to the
+    // next marker (or up to the point where a marker might be starting), then
+    // consume complete markers. Any partial marker at the tail is held back
+    // until the next chunk arrives, so markers split across chunks still work.
+    while (true) {
+      const markerStart = buffer.indexOf("{{")
+      if (markerStart === -1) {
+        // No marker in sight — safe to flush everything as text.
+        if (buffer) {
+          callbacks.onChunk(buffer)
+          buffer = ""
+        }
+        return
+      }
+
+      // Emit any plain text that precedes the marker.
+      if (markerStart > 0) {
+        callbacks.onChunk(buffer.slice(0, markerStart))
+        buffer = buffer.slice(markerStart)
+      }
+
+      // Now buffer starts with "{{". Look for the closing "}}".
+      const markerEnd = buffer.indexOf("}}")
+      if (markerEnd === -1) {
+        // Incomplete marker — wait for more data (unless we're flushing at end-of-stream).
+        if (flush) {
+          // End of stream with an unterminated marker: emit as raw text so nothing is silently dropped.
+          callbacks.onChunk(buffer)
+          buffer = ""
+        }
+        return
+      }
+
+      const marker = buffer.slice(2, markerEnd) // strip "{{" and "}}"
+      buffer = buffer.slice(markerEnd + 2)
+
+      const colonIdx = marker.indexOf(":")
+      const kind = colonIdx === -1 ? marker : marker.slice(0, colonIdx)
+      const payload = colonIdx === -1 ? "" : marker.slice(colonIdx + 1)
+
+      if (kind === "STATUS") {
+        callbacks.onStatus(payload)
+      } else if (kind === "TOOLS") {
+        try {
+          callbacks.onTools(JSON.parse(payload) as ToolCard[])
+        } catch {
+          /* malformed JSON — skip */
+        }
+      } else if (kind === "FOLLOWUPS") {
+        callbacks.onFollowups(payload.split("||").map((s) => s.trim()))
+      } else {
+        // Unknown marker — pass through as text so it's visible rather than silently swallowed.
+        callbacks.onChunk(`{{${marker}}}`)
+      }
+    }
+  }
+
   while (true) {
     const { done, value } = await reader.read()
-    if (done) break
-
+    if (done) {
+      buffer += decoder.decode()
+      processBuffer(true)
+      break
+    }
     buffer += decoder.decode(value, { stream: true })
-
-    // Extract all markers before sending any text
-    // Status markers
-    let statusMatch
-    while ((statusMatch = buffer.match(/\{\{STATUS:(.+?)\}\}/)) !== null) {
-      callbacks.onStatus(statusMatch[1])
-      buffer = buffer.replace(statusMatch[0], "")
-    }
-
-    // Extract tool cards
-    const toolsMatch = buffer.match(/\{\{TOOLS:(.+?)\}\}/)
-    if (toolsMatch) {
-      try {
-        const tools = JSON.parse(toolsMatch[1]) as ToolCard[]
-        callbacks.onTools(tools)
-      } catch { /* malformed JSON — skip */ }
-      buffer = buffer.replace(toolsMatch[0], "")
-    }
-
-    // Extract followups
-    const followupMatch = buffer.match(/\{\{FOLLOWUPS:(.+?)\}\}/)
-    if (followupMatch) {
-      const suggestions = followupMatch[1].split("||").map(s => s.trim())
-      callbacks.onFollowups(suggestions)
-      buffer = buffer.replace(followupMatch[0], "")
-    }
-
-    if (buffer) {
-      callbacks.onChunk(buffer)
-      buffer = ""
-    }
+    processBuffer(false)
   }
 }
 
@@ -97,5 +130,17 @@ export async function ingestAll(): Promise<{ status: string; results: unknown[] 
 export async function healthCheck(): Promise<{ supabase: string; chromadb: string; openai: string }> {
   const res = await fetch(`${API_BASE}/health`)
   if (!res.ok) throw new Error(`Health check failed: ${res.status}`)
+  return res.json()
+}
+
+export type ModelInfo = {
+  id: string
+  name: string
+  pricing: { prompt: string; completion: string }
+}
+
+export async function fetchModels(): Promise<ModelInfo[]> {
+  const res = await fetch(`${API_BASE}/models`)
+  if (!res.ok) throw new Error(`Models fetch failed: ${res.status}`)
   return res.json()
 }
