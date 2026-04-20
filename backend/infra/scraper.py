@@ -9,7 +9,8 @@ import logging
 import httpx
 
 from models import RepoRecord
-from infra.db import supabase, GITHUB_TOKEN
+from infra.db import GITHUB_TOKEN
+from infra.firestore_db import save_repo as _fs_save_repo
 
 logger = logging.getLogger(__name__)
 
@@ -117,25 +118,13 @@ def scrape_repo(repo_url: str) -> RepoRecord | None:
 
 
 def save_repo(record: RepoRecord):
-    """Upsert scraped content to Supabase repos table."""
-    supabase.table("repos").upsert({
-        "repo_name": record.repo_name,
-        "owner": record.owner,
-        "readme_text": record.readme_text,
-        "file_contents": record.file_contents,
-        "commit_sha": record.commit_sha,
-    }).execute()
+    """Upsert scraped repo metadata to Firestore /repos collection."""
+    _fs_save_repo(record)
 
 
 def get_readme(repo_name: str) -> str:
-    """Read full README from Supabase (used by Agent 4)."""
-    result = (
-        supabase.table("repos")
-        .select("readme_text")
-        .eq("repo_name", repo_name)
-        .limit(1)
-        .execute()
-    )
-    if result.data:
-        return result.data[0].get("readme_text", "")
-    return ""
+    """Read README from Firestore (used by Agent 4)."""
+    from infra.firestore_db import get_db, encode_id
+    db = get_db()
+    doc = db.collection("repos").document(encode_id(repo_name)).get()
+    return doc.to_dict().get("readme_text", "") if doc.exists else ""

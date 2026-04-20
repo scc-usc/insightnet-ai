@@ -14,7 +14,11 @@ import json
 import logging
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+from concurrent.futures import ThreadPoolExecutor
+
+# Load .env before any infra imports so Firebase/OpenAI creds are available
+from dotenv import load_dotenv
+load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -263,101 +267,111 @@ def embed_all():
 
 
 # =====================================================================
-#  Phase 3: Migrate  (push everything to Supabase + ChromaDB Cloud)
+#  Phase 3: Migrate  (push everything to Firestore)
 # =====================================================================
 
-def _chroma_upsert_safe(collection, timeout=60, **kwargs):
-    pool = ThreadPoolExecutor(max_workers=1)
-    future = pool.submit(collection.upsert, **kwargs)
-    try:
-        future.result(timeout=timeout)
-    except FuturesTimeout:
-        logger.warning(f"Chroma upsert timed out after {timeout}s -- skipping batch")
-    finally:
-        pool.shutdown(wait=False)
-
-
 def migrate_all():
-    """Phase 3: push local data to Supabase + ChromaDB Cloud."""
-    from infra.db import supabase, col_profiles, col_readme, col_code
+    """Phase 3: push local JSON data to Firestore (replaces Supabase + ChromaDB)."""
+    from infra.firestore_db import (
+        get_db, encode_id, save_repo as _fs_save_repo,
+        save_tool_profile, save_chunk, log_ingestion,
+    )
+    from models import RepoRecord
+    from google.cloud.firestore_v1.vector import Vector
+    import firebase_admin
 
-    repos = _load_json(REPOS_FILE) or {}
+    repos_data = _load_json(REPOS_FILE) or {}
     profiles = _load_json(PROFILES_FILE) or {}
     embeddings = _load_json(EMBEDDINGS_FILE) or {}
 
     print(f"\n{'='*60}")
-    print(f"  Phase 3: Migrate to Supabase + ChromaDB Cloud")
-    print(f"  {len(repos)} repos, {len(profiles)} profiles,")
+    print(f"  Phase 3: Migrate to Firestore")
+    print(f"  {len(repos_data)} repos, {len(profiles)} profiles,")
     print(f"  {len(embeddings.get('profiles', {}))} profile embeddings,")
     print(f"  {len(embeddings.get('chunks', {}))} chunk embeddings")
     print(f"{'='*60}\n")
 
-    # ── Supabase: repos ──────────────────────────────────────────────
-    print("Uploading repos to Supabase...", flush=True)
-    repo_list = list(repos.values())
-    for bi in range(0, len(repo_list), 5):
-        batch = repo_list[bi : bi + 5]
-        try:
-            supabase.table("repos").upsert(batch).execute()
-            print(f"  repos batch {bi//5+1} done ({len(batch)} rows)", flush=True)
-        except Exception as e:
-            logger.error(f"Repos batch failed: {e}")
+    db = get_db()
 
-    # ── Supabase: tool_profiles ──────────────────────────────────────
-    print("Uploading profiles to Supabase...", flush=True)
-    prof_rows = [{"repo_name": name, "profile": prof} for name, prof in profiles.items()]
-    for bi in range(0, len(prof_rows), 20):
-        batch = prof_rows[bi : bi + 20]
+    # ── Firestore: repos ─────────────────────────────────────────────
+    print("Uploading repos to Firestore /repos...", flush=True)
+    for i, (repo_name, data) in enumerate(repos_data.items()):
         try:
-            supabase.table("tool_profiles").upsert(batch).execute()
-            print(f"  profiles batch {bi//20+1} done ({len(batch)} rows)", flush=True)
-        except Exception as e:
-            logger.error(f"Profiles batch failed: {e}")
-
-    # ── ChromaDB: profiles ───────────────────────────────────────────
-    print("Uploading profile embeddings to ChromaDB...", flush=True)
-    prof_embs = list(embeddings.get("profiles", {}).values())
-    for bi in range(0, len(prof_embs), 50):
-        batch = prof_embs[bi : bi + 50]
-        try:
-            _chroma_upsert_safe(
-                col_profiles,
-                ids=[e["id"] for e in batch],
-                documents=[e["text"] for e in batch],
-                embeddings=[e["embedding"] for e in batch],
-                metadatas=[e["metadata"] for e in batch],
+            record = RepoRecord(
+                repo_name=data["repo_name"],
+                owner=data.get("owner", ""),
+                readme_text=data.get("readme_text", ""),
+                commit_sha=data.get("commit_sha", ""),
             )
-            print(f"  profiles chroma batch {bi//50+1} done", flush=True)
+            _fs_save_repo(record)
+            if (i + 1) % 10 == 0:
+                print(f"  repos: {i+1}/{len(repos_data)}", flush=True)
         except Exception as e:
-            logger.error(f"Chroma profiles batch failed: {e}")
+            logger.error(f"Repo upload failed for {repo_name}: {e}")
+    print(f"  repos done ({len(repos_data)})", flush=True)
 
-    # ── ChromaDB: chunks ─────────────────────────────────────────────
-    print("Uploading chunk embeddings to ChromaDB...", flush=True)
-    chunk_embs = list(embeddings.get("chunks", {}).values())
+    # ── Firestore: tool_profiles (without embeddings) ────────────────
+    print("Uploading tool profiles to Firestore /tool_profiles...", flush=True)
+    for i, (repo_name, profile) in enumerate(profiles.items()):
+        try:
+            # We store without embedding here; Phase 2 adds embedding separately
+            db.collection("tool_profiles").document(encode_id(repo_name)).set(
+                {"repo_name": repo_name, "profile": profile, "content": json.dumps(profile)},
+                merge=True,
+            )
+            if (i + 1) % 10 == 0:
+                print(f"  profiles: {i+1}/{len(profiles)}", flush=True)
+        except Exception as e:
+            logger.error(f"Profile upload failed for {repo_name}: {e}")
+    print(f"  profiles done ({len(profiles)})", flush=True)
 
-    readme_embs = [e for e in chunk_embs if e["chunk_type"] == "readme"]
-    code_embs = [e for e in chunk_embs if e["chunk_type"] == "code"]
+    # ── Firestore: profile embeddings ────────────────────────────────
+    print("Uploading profile embeddings to Firestore /tool_profiles...", flush=True)
+    prof_embs = embeddings.get("profiles", {})
+    for i, (repo_name, entry) in enumerate(prof_embs.items()):
+        try:
+            db.collection("tool_profiles").document(encode_id(repo_name)).set(
+                {"embedding": Vector(entry["embedding"])},
+                merge=True,
+            )
+            if (i + 1) % 20 == 0:
+                print(f"  profile embeddings: {i+1}/{len(prof_embs)}", flush=True)
+        except Exception as e:
+            logger.error(f"Profile embedding failed for {repo_name}: {e}")
+    print(f"  profile embeddings done ({len(prof_embs)})", flush=True)
 
-    for label, embs, collection in [
-        ("readme", readme_embs, col_readme),
-        ("code", code_embs, col_code),
+    # ── Firestore: chunk embeddings ───────────────────────────────────
+    chunk_embs = embeddings.get("chunks", {})
+    readme_embs = {k: v for k, v in chunk_embs.items() if v.get("chunk_type") == "readme"}
+    code_embs = {k: v for k, v in chunk_embs.items() if v.get("chunk_type") == "code"}
+
+    for label, embs_dict, col_name in [
+        ("readme", readme_embs, "readme_chunks"),
+        ("code", code_embs, "code_chunks"),
     ]:
-        for bi in range(0, len(embs), 50):
-            batch = embs[bi : bi + 50]
+        print(f"Uploading {label} chunk embeddings to Firestore /{col_name}...", flush=True)
+        items = list(embs_dict.items())
+        for i, (chunk_id, entry) in enumerate(items):
             try:
-                _chroma_upsert_safe(
-                    collection,
-                    ids=[e["id"] for e in batch],
-                    documents=[e["text"] for e in batch],
-                    embeddings=[e["embedding"] for e in batch],
-                    metadatas=[e["metadata"] for e in batch],
-                )
-                print(f"  {label} chroma batch {bi//50+1} done ({len(batch)})", flush=True)
+                meta = entry.get("metadata", {})
+                db.collection(col_name).document(encode_id(chunk_id)).set({
+                    "chunk_id": chunk_id,
+                    "repo_name": meta.get("repo_name", ""),
+                    "chunk_type": entry.get("chunk_type", label),
+                    "content": entry.get("text", ""),
+                    "embedding": Vector(entry["embedding"]),
+                    "section_header": meta.get("section_header", ""),
+                    "function_name": meta.get("function_name", ""),
+                })
+                if (i + 1) % 50 == 0:
+                    print(f"  {label} chunks: {i+1}/{len(items)}", flush=True)
             except Exception as e:
-                logger.error(f"Chroma {label} batch failed: {e}")
+                logger.error(f"{label} chunk upload failed {chunk_id}: {e}")
+        print(f"  {label} chunks done ({len(items)})", flush=True)
 
     print(f"\n{'='*60}")
-    print(f"  Phase 3 complete -- all data pushed to Supabase + ChromaDB")
+    print(f"  Phase 3 complete — all data pushed to Firestore")
+    print(f"  Next: create vector indexes with the commands in .env.example")
     print(f"{'='*60}\n")
 
 

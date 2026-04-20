@@ -7,10 +7,12 @@ chunk_and_embed(): used by updater for re-ingestion (writes to Supabase + Chroma
 
 import json
 import logging
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 from infra import openai_client
-from infra.db import supabase, col_profiles, col_readme, col_code
+from infra.firestore_db import (
+    get_tool_profile, save_tool_profile,
+    save_chunk, vector_search,
+)
 from ingestion.chunker import chunk_readme, chunk_code
 
 logger = logging.getLogger(__name__)
@@ -22,15 +24,7 @@ SUMMARIZE_SYSTEM = (
 )
 
 
-def _chroma_upsert_safe(collection, timeout=60, **kwargs):
-    pool = ThreadPoolExecutor(max_workers=1)
-    future = pool.submit(collection.upsert, **kwargs)
-    try:
-        future.result(timeout=timeout)
-    except TimeoutError:
-        logger.error(f"Chroma upsert timed out after {timeout}s")
-    finally:
-        pool.shutdown(wait=False)
+
 
 
 def summarize_repo(repo_name: str, readme_text: str, file_tree: list[str]) -> dict:
@@ -64,62 +58,51 @@ def summarize_repo(repo_name: str, readme_text: str, file_tree: list[str]) -> di
 
 
 def chunk_and_embed(repo_name: str, sections: list[dict], code_blocks: list[dict]):
-    """Chunk + embed + upsert to ChromaDB. Used by updater re-ingestion."""
+    """Chunk + embed + upsert to Firestore (tool_profiles, readme_chunks, code_chunks)."""
     readme_chunks = chunk_readme(sections, repo_name)
     code_chunks = chunk_code(code_blocks, repo_name)
 
-    # Embed profile
-    profile_text = ""
-    result = (
-        supabase.table("tool_profiles")
-        .select("profile")
-        .eq("repo_name", repo_name)
-        .limit(1)
-        .execute()
-    )
-    if result.data:
-        profile_text = json.dumps(result.data[0].get("profile", {}))
-
-    if profile_text:
+    # ── Profile embedding ───────────────────────────────────────────
+    profile = get_tool_profile(repo_name)
+    if profile:
+        profile_text = json.dumps(profile)
         try:
             emb = openai_client.embed([profile_text])
-            _chroma_upsert_safe(
-                col_profiles,
-                ids=[f"{repo_name}::profile"],
-                documents=[profile_text],
-                embeddings=emb,
-                metadatas=[{"repo_name": repo_name, "chunk_type": "profile"}],
-            )
+            save_tool_profile(repo_name, profile, profile_text, emb[0])
         except Exception as e:
             logger.error(f"Profile embed failed for {repo_name}: {e}")
 
-    # Embed README chunks
+    # ── README chunk embeddings ─────────────────────────────────────
     non_empty = [c for c in readme_chunks if c.content.strip()]
     for i in range(0, len(non_empty), 100):
         batch = non_empty[i : i + 100]
         texts = [c.content for c in batch]
-        ids = [c.id for c in batch]
-        metas = [{"repo_name": c.repo_name, "chunk_type": "readme", "section_header": c.section_header} for c in batch]
         try:
-            emb = openai_client.embed(texts)
-            _chroma_upsert_safe(col_readme, ids=ids, documents=texts, embeddings=emb, metadatas=metas)
+            embs = openai_client.embed(texts)
+            for c, emb in zip(batch, embs):
+                save_chunk(
+                    c.id, c.repo_name, "readme", c.content, emb,
+                    section_header=c.section_header,
+                )
         except Exception as e:
             logger.error(f"README embed failed for {repo_name}: {e}")
 
-    # Embed code chunks
+    # ── Code chunk embeddings ───────────────────────────────────────
     non_empty_code = [c for c in code_chunks if c.content.strip()]
     for i in range(0, len(non_empty_code), 100):
         batch = non_empty_code[i : i + 100]
         texts = [c.content for c in batch]
-        ids = [c.id for c in batch]
-        metas = [{"repo_name": c.repo_name, "chunk_type": "code", "function_name": c.function_name} for c in batch]
         try:
-            emb = openai_client.embed(texts)
-            _chroma_upsert_safe(col_code, ids=ids, documents=texts, embeddings=emb, metadatas=metas)
+            embs = openai_client.embed(texts)
+            for c, emb in zip(batch, embs):
+                save_chunk(
+                    c.id, c.repo_name, "code", c.content, emb,
+                    function_name=c.function_name,
+                )
         except Exception as e:
             logger.error(f"Code embed failed for {repo_name}: {e}")
 
     logger.info(
         f"Embedded {repo_name}: {len(readme_chunks)} readme, "
-        f"{len(code_chunks)} code, profile={'yes' if profile_text else 'no'}"
+        f"{len(code_chunks)} code, profile={'yes' if profile else 'no'}"
     )

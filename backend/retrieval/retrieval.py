@@ -10,18 +10,14 @@ import logging
 from collections import defaultdict
 
 from infra import openai_client
-from infra.db import col_profiles, col_readme, col_code
+from infra.firestore_db import vector_search
 from models import QueryPlan, RankedResult
 
 logger = logging.getLogger(__name__)
 
 _embed_cache: dict[str, list[float]] = {}
 
-COLLECTION_MAP = {
-    "tool_profiles": col_profiles,
-    "readme_chunks": col_readme,
-    "code_chunks": col_code,
-}
+_COLLECTION_NAMES = {"tool_profiles", "readme_chunks", "code_chunks"}
 
 
 def embed_query(query: str) -> list[float]:
@@ -34,21 +30,18 @@ def embed_query(query: str) -> list[float]:
 
 
 def retrieve(query_plan: QueryPlan, query_embedding: list[float], top_k: int = 10) -> list[RankedResult]:
-    """Query each preferred collection, apply RRF, return top-20 deduplicated by repo."""
+    """Query each preferred collection via Firestore vector search, apply RRF, return top-20."""
     all_hits: list[tuple[str, str, str, int]] = []  # (repo_name, chunk_text, collection, rank)
 
     for col_name in query_plan.preferred_collections:
-        col = COLLECTION_MAP.get(col_name)
-        if col is None:
+        if col_name not in _COLLECTION_NAMES:
             continue
         try:
-            results = col.query(query_embeddings=[query_embedding], n_results=top_k)
-            if results and results["documents"] and results["documents"][0]:
-                docs = results["documents"][0]
-                metas = results["metadatas"][0] if results["metadatas"] else [{}] * len(docs)
-                for rank, (doc, meta) in enumerate(zip(docs, metas)):
-                    repo = meta.get("repo_name", "unknown")
-                    all_hits.append((repo, doc, col_name, rank))
+            docs = vector_search(col_name, query_embedding, limit=top_k)
+            for rank, doc in enumerate(docs):
+                repo = doc.get("repo_name", "unknown")
+                text = doc.get("content", "")
+                all_hits.append((repo, text, col_name, rank))
         except Exception as e:
             logger.error(f"Query failed for {col_name}: {e}")
 

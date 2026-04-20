@@ -13,7 +13,8 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError
 import httpx
 import schedule
 
-from infra.db import supabase, GITHUB_TOKEN, col_profiles, col_readme, col_code
+from infra.db import GITHUB_TOKEN
+from infra.firestore_db import get_repo_sha, log_ingestion, delete_repo_chunks, list_repo_names
 from infra.scraper import load_repo_list, scrape_repo, save_repo
 from ingestion.parser import parse_readme, parse_code
 from ingestion.summarizer import summarize_repo, chunk_and_embed
@@ -39,33 +40,14 @@ def _get_latest_sha(repo_name: str) -> str | None:
 
 
 def _get_stored_sha(repo_name: str) -> str | None:
-    result = supabase.table("repos").select("commit_sha").eq("repo_name", repo_name).limit(1).execute()
-    if result.data:
-        return result.data[0].get("commit_sha")
-    return None
+    return get_repo_sha(repo_name)
 
 
 def _log_ingestion(repo_name: str, trigger: str, status: str, commit_sha: str = ""):
     try:
-        supabase.table("ingestion_log").insert({
-            "repo_name": repo_name,
-            "trigger": trigger,
-            "status": status,
-            "commit_sha": commit_sha,
-        }).execute()
+        log_ingestion(repo_name, trigger, status, commit_sha)
     except Exception as e:
         logger.error(f"Failed to log ingestion for {repo_name}: {e}")
-
-
-def _delete_chroma_entries(repo_name: str):
-    """Delete stale ChromaDB entries for a repo across all collections."""
-    for col in (col_profiles, col_readme, col_code):
-        try:
-            existing = col.get(where={"repo_name": repo_name})
-            if existing["ids"]:
-                col.delete(ids=existing["ids"])
-        except Exception:
-            pass
 
 
 def reingest_repo(repo_name: str):
@@ -77,7 +59,7 @@ def reingest_repo(repo_name: str):
         _log_ingestion(repo_name, "update", "failed")
         return
 
-    _delete_chroma_entries(repo_name)
+    delete_repo_chunks(repo_name)
     save_repo(record)
 
     sections = parse_readme(record.readme_text)

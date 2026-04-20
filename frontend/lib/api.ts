@@ -1,6 +1,13 @@
 import { Message, ToolCard } from "./types"
+import { getIdToken } from "./firebase/auth"
 
 const API_BASE = "/api"
+
+/** Returns Authorization header if a Firebase token is available. */
+async function authHeaders(): Promise<Record<string, string>> {
+  const token = await getIdToken()
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
 
 type StreamCallbacks = {
   onChunk: (text: string) => void
@@ -16,9 +23,10 @@ export async function queryStream(
   signal?: AbortSignal,
   model?: string
 ): Promise<void> {
+  const auth = await authHeaders()
   const res = await fetch(`${API_BASE}/query`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...auth },
     body: JSON.stringify({
       query,
       history: history.map(m => ({ role: m.role, content: m.content })),
@@ -108,9 +116,10 @@ export async function queryStream(
 }
 
 export async function ingestRepo(repoUrl: string): Promise<{ status: string; repo?: string }> {
+  const auth = await authHeaders()
   const res = await fetch(`${API_BASE}/ingest`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...auth },
     body: JSON.stringify({ repo_url: repoUrl }),
   })
   if (!res.ok) throw new Error(`Ingest failed: ${res.status}`)
@@ -118,16 +127,17 @@ export async function ingestRepo(repoUrl: string): Promise<{ status: string; rep
 }
 
 export async function ingestAll(): Promise<{ status: string; results: unknown[] }> {
+  const auth = await authHeaders()
   const res = await fetch(`${API_BASE}/ingest`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...auth },
     body: JSON.stringify({ run_all: true }),
   })
   if (!res.ok) throw new Error(`Ingest failed: ${res.status}`)
   return res.json()
 }
 
-export async function healthCheck(): Promise<{ supabase: string; chromadb: string; openai: string }> {
+export async function healthCheck(): Promise<{ firestore: string; openrouter: string }> {
   const res = await fetch(`${API_BASE}/health`)
   if (!res.ok) throw new Error(`Health check failed: ${res.status}`)
   return res.json()
@@ -140,7 +150,8 @@ export type ModelInfo = {
 }
 
 export async function fetchModels(): Promise<ModelInfo[]> {
-  const res = await fetch(`${API_BASE}/models`)
+  const auth = await authHeaders()
+  const res = await fetch(`${API_BASE}/models`, { headers: { ...auth } })
   if (!res.ok) throw new Error(`Models fetch failed: ${res.status}`)
   return res.json()
 }

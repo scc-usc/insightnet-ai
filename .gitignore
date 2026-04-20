@@ -57,3 +57,4 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 frontend/next-env.d.ts
+insightnet-ai-firebase-adminsdk-fbsvc-a5db133ae1.json

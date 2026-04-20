@@ -5,6 +5,7 @@ import MessageList from "./MessageList"
 import ChatInput from "./ChatInput"
 import { Message } from "@/lib/types"
 import { queryStream, fetchModels, ModelInfo } from "@/lib/api"
+import { ensureSignedIn } from "@/lib/firebase/auth"
 import Image from "next/image"
 
 const STORAGE_KEY = "insightnet-chat"
@@ -86,8 +87,8 @@ export default function ChatContainer() {
   useEffect(() => {
     setMessages(loadMessages())
     setHydrated(true)
-    // Load available models and validate the saved pick against the live list
-    fetchModels().then(m => {
+    // Wait for Firebase anonymous auth before fetching models
+    ensureSignedIn().then(() => fetchModels()).then(m => {
       setModels(m)
       const saved = localStorage.getItem("insightnet-model")
       if (saved && m.some(model => model.id === saved)) {

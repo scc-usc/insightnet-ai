@@ -1,0 +1,65 @@
+[debug] [2026-04-20T19:13:04.552Z] ----------------------------------------------------------------------
+[debug] [2026-04-20T19:13:04.553Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\ajite\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js init
+[debug] [2026-04-20T19:13:04.554Z] CLI Version:   15.2.1
+[debug] [2026-04-20T19:13:04.554Z] Platform:      win32
+[debug] [2026-04-20T19:13:04.554Z] Node Version:  v24.12.0
+[debug] [2026-04-20T19:13:04.554Z] Time:          Mon Apr 20 2026 12:13:04 GMT-0700 (Pacific Daylight Time)
+[debug] [2026-04-20T19:13:04.554Z] ----------------------------------------------------------------------
+[debug] 
+[info] 
+     ######## #### ########  ######## ########     ###     ######  ########
+     ##        ##  ##     ## ##       ##     ##  ##   ##  ##       ##
+     ######    ##  ########  ######   ########  #########  ######  ######
+     ##        ##  ##    ##  ##       ##     ## ##     ##       ## ##
+     ##       #### ##     ## ######## ########  ##     ##  ######  ########
+
+You're about to initialize a Firebase project in this directory:
+
+  C:\Users\ajite\code\InsightNet\insightnet
+
+[info] 
+=== Account Setup
+[info] 
+[info] Which account do you want to use for this project? Choose an account or add a new one now
+[info] 
+[debug] [2026-04-20T19:13:57.336Z] setProjectAccount(C:\Users\ajite\code\InsightNet\insightnet, aj.srivastava@northeastern.edu)
+[info] 
+[info] +  Using account: aj.srivastava@northeastern.edu 
+[info] 
+=== Project Setup
+[info] 
+[info] First, let's associate this project directory with a Firebase project.
+[info] You can create multiple project aliases by running firebase use --add, 
+[info] 
+[debug] [2026-04-20T19:14:00.295Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-04-20T19:14:00.296Z] > authorizing via signed-in user (aj.srivastava@northeastern.edu)
+[debug] [2026-04-20T19:14:00.298Z] Checked if tokens are valid: true, expires at: 1776715856647
+[debug] [2026-04-20T19:14:00.299Z] Checked if tokens are valid: true, expires at: 1776715856647
+[debug] [2026-04-20T19:14:00.301Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects pageSize=100
+[debug] [2026-04-20T19:14:00.673Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects 200
+[debug] [2026-04-20T19:14:00.673Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects [omitted]
+[info] 
+=== Hosting Setup
+[debug] [2026-04-20T19:14:02.189Z] Checked if tokens are valid: true, expires at: 1776715856647
+[debug] [2026-04-20T19:14:02.189Z] Checked if tokens are valid: true, expires at: 1776715856647
+[debug] [2026-04-20T19:14:02.189Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/insightnet-ai [none]
+[debug] [2026-04-20T19:14:02.330Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/insightnet-ai 200
+[debug] [2026-04-20T19:14:02.330Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects/insightnet-ai {"projectId":"insightnet-ai","projectNumber":"932354682537","displayName":"InsightNet-AI","name":"projects/insightnet-ai","resources":{"hostingSite":"insightnet-ai"},"state":"ACTIVE","etag":"1_1a695ee3-1f79-4cfb-aee3-c67adc05b075"}
+[info] 
+[info] Your public directory is the folder (relative to your project directory) that
+[info] will contain Hosting assets to be uploaded with firebase deploy. If you
+[info] have a build process for your assets, use your build's output directory.
+[info] 
+[debug] [2026-04-20T19:15:19.158Z] ExitPromptError: User force closed the prompt with SIGINT
+    at Interface.sigint (C:\Users\ajite\AppData\Roaming\npm\node_modules\firebase-tools\node_modules\@inquirer\core\dist\commonjs\lib\create-prompt.js:101:37)
+    at Interface.emit (node:events:508:28)
+    at [_ttyWrite] [as _ttyWrite] (node:internal/readline/interface:1327:18)
+    at ReadStream.onkeypress (node:internal/readline/interface:284:20)
+    at ReadStream.emit (node:events:520:35)
+    at emitKeys (node:internal/readline/utils:371:14)
+    at emitKeys.next (<anonymous>)
+    at ReadStream.onData (node:internal/readline/emitKeypressEvents:64:36)
+    at ReadStream.emit (node:events:508:28)
+    at addChunk (node:internal/streams/readable:559:12)
+[error] 
+[error] Error: An unexpected error has occurred.

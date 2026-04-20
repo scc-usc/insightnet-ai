@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from "next/server"
 
+/**
+ * Middleware — site-password gate (optional).
+ *
+ * If SITE_PASSWORD is set, users must pass the login page before accessing
+ * the app. Firebase anonymous sign-in then happens client-side, and every
+ * backend request includes a Firebase ID token for per-user rate limiting.
+ *
+ * If SITE_PASSWORD is not set, the login page is skipped entirely.
+ */
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // Skip auth check for login page, API routes, and static assets
+  // Always allow static assets, login page, and API routes
   if (
     pathname === "/login" ||
     pathname.startsWith("/api/") ||
@@ -14,9 +23,15 @@ export function middleware(request: NextRequest) {
     return NextResponse.next()
   }
 
-  // Check for auth cookie
+  // If no site password is configured, skip the gate
+  const hasSitePassword = Boolean(process.env.SITE_PASSWORD)
+  if (!hasSitePassword) {
+    return NextResponse.next()
+  }
+
+  // Check for auth cookie set by /api/auth
   const auth = request.cookies.get("insightnet-auth")
-  if (!auth) {
+  if (!auth?.value) {
     return NextResponse.redirect(new URL("/login", request.url))
   }
 
@@ -26,3 +41,4 @@ export function middleware(request: NextRequest) {
 export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
 }
+

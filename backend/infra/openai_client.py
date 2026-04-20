@@ -151,8 +151,12 @@ def list_models() -> list[dict]:
         return []
 
 
+EMBED_MODEL = "perplexity/pplx-embed-v1-0.6b"
+EMBED_DIMENSIONS = 512
+
+
 def embed(texts: list[str]) -> list[list[float]]:
-    """Batch-embed with text-embedding-3-large (100 per request, retry on 429)."""
+    """Batch-embed with pplx-embed-v1-0.6b at 512 dims (100 per request, retry on 429)."""
     all_embeddings: list[list[float]] = []
 
     for i in range(0, len(texts), 100):
@@ -160,8 +164,9 @@ def embed(texts: list[str]) -> list[list[float]]:
         for attempt in range(3):
             try:
                 resp = client.embeddings.create(
-                    model="openai/text-embedding-3-large",
+                    model=EMBED_MODEL,
                     input=batch,
+                    dimensions=EMBED_DIMENSIONS,
                 )
                 all_embeddings.extend([item.embedding for item in resp.data])
                 break

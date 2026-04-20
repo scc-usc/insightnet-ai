@@ -3,6 +3,7 @@ import { Geist } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import "./globals.css";
 import "highlight.js/styles/github.css";
+import { FirebaseAuthProvider } from "@/components/FirebaseAuthProvider";
 
 const defaultUrl = process.env.VERCEL_URL
   ? `https://${process.env.VERCEL_URL}`
@@ -37,7 +38,9 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          {children}
+          <FirebaseAuthProvider>
+            {children}
+          </FirebaseAuthProvider>
         </ThemeProvider>
       </body>
     </html>

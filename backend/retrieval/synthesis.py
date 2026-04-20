@@ -13,7 +13,7 @@ import logging
 import re
 
 from infra import openai_client
-from infra.db import supabase
+from infra.firestore_db import get_tool_profile as _fs_get_tool_profile, get_db
 from infra.scraper import get_readme
 from retrieval.query_understanding import understand_query
 from retrieval.retrieval import embed_query, retrieve
@@ -61,7 +61,9 @@ Rules:
 - NEVER repeat the question back
 {FOLLOWUPS_INSTRUCTION}"""
 
-CHAT_SYSTEM_PROMPT = f"""You are InsightNet, an expert on epidemic modeling tools and methods. You're a colleague in the lab — warm, direct, and brief.
+CHAT_SYSTEM_PROMPT = f"""You are InsightNet AI, an assistant for the users of tools developed by the members of the Insight Net centers. Insight Net is a national network of centers working to improve our collective ability to understand, predict, prepare for, and respond to infectious disease threats through collaboration between analytic experts and public health departments.
+
+You're a colleague in the lab — warm, direct, and brief.
 
 CRITICAL — match response length to the message:
 - Greetings ("hi", "hello", "hey"): reply in ONE friendly sentence. No bullet menus. No capability tour. Example: "Hey! What are you working on?"
@@ -72,18 +74,22 @@ CRITICAL — match response length to the message:
 Never pad. Never list your capabilities unprompted. Never start with "Great question!" or similar filler. If a question could benefit from a tool search, say so in one line — don't preemptively list tool categories.
 {FOLLOWUPS_INSTRUCTION}"""
 
-EXPLAIN_PROMPT = f"""You are InsightNet. The user wants to know about an epidemic modeling tool.
+EXPLAIN_PROMPT = f"""You are InsightNet AI, an assistant for the users of tools developed by the members of the Insight Net centers. Insight Net is a national network of centers working to improve our collective ability to understand, predict, prepare for, and respond to infectious disease threats through collaboration between analytic experts and public health departments.
+
+The user wants to know about an epidemic modeling tool.
 
 Answer the question the user actually asked, using the profile and README provided. Stay under ~200 words unless the question genuinely requires more depth.
 
-Do NOT produce a structured overview with every section (what/who/how/features/limitations). Pick only the angles relevant to the question. For open-ended requests like "tell me more", give a focused 3-4 paragraph overview — NOT a spec sheet with 9 headers.
+Do NOT produce a structured overview with every section (what/who/how/features/limitations). Pick only the angles relevant to the question. For open-ended requests like "tell me more", give a focused 2 paragraph overview — NOT a spec sheet with 9 headers.
 
 Mention the repo name (owner/repo) once near the start. Do NOT cite it after every bullet or sentence — one mention is enough.
 
 If the user is asking a follow-up to an earlier explanation, answer the specific question directly. Don't repeat what they already know.
 {FOLLOWUPS_INSTRUCTION}"""
 
-_DISCUSS_TEMPLATE = """You are InsightNet. The user is asking about tools you previously showed them.
+_DISCUSS_TEMPLATE = """You are InsightNet AI, an assistant for the users of tools developed by the members of the Insight Net centers. Insight Net is a national network of centers working to improve our collective ability to understand, predict, prepare for, and respond to infectious disease threats through collaboration between analytic experts and public health departments.
+
+The user is asking about tools you previously showed them.
 
 Use the tool profiles below to give ONE clear recommendation with reasoning. Don't hedge with multiple overlapping recommendations ("my pick", "default choice", "if I had to pick one") — that's the same answer three times.
 
@@ -98,7 +104,9 @@ Previously shown tool profiles:
 {tool_context}
 """ + _FOLLOWUPS_INSTRUCTION_ESCAPED
 
-_FOLLOWUP_TEMPLATE = """You are InsightNet. The user is asking a specific question about an epidemic modeling tool.
+_FOLLOWUP_TEMPLATE = """You are InsightNet. 
+    
+The user is asking a specific question about an epidemic modeling tool.
 
 Answer the exact question, nothing more. Match response length to the question:
 - Yes/no questions: lead with "Yes" or "No", then 1-2 sentences of supporting detail from the profile/README. Do NOT add "What it supports / What is not documented" bullet lists.
@@ -119,18 +127,16 @@ def _build_history(history: list[dict], limit: int = 6) -> list[dict]:
 
 
 def _get_tool_profile(repo_name: str) -> dict:
-    """Fetch tool profile from Supabase."""
+    """Fetch tool profile from Firestore."""
     try:
-        result = supabase.table("tool_profiles").select("profile").eq("repo_name", repo_name).limit(1).execute()
-        if result.data and result.data[0].get("profile"):
-            return result.data[0]["profile"]
+        return _fs_get_tool_profile(repo_name) or {}
     except Exception as e:
         logger.error(f"Failed to fetch profile for {repo_name}: {e}")
     return {}
 
 
 def _build_tool_cards(top_results: list) -> list[dict]:
-    """Build structured tool card data from ranked results + Supabase profiles."""
+    """Build structured tool card data from ranked results + Firestore profiles."""
     cards = []
     for i, result in enumerate(top_results):
         profile = _get_tool_profile(result.repo_name)
@@ -182,24 +188,25 @@ def _extract_repo_from_context(query: str, history: list[dict], referenced_tools
         if word in query_lower and idx < len(shown):
             return shown[idx]
 
-    # Third: text match against all tool names
+    # Third: text match against all tool names in Firestore
     all_text = query_lower
     for msg in reversed(history[-6:]):
         all_text += " " + msg.get("content", "").lower()
 
     try:
-        result = supabase.table("tool_profiles").select("repo_name,profile").execute()
-        if result.data:
-            for row in result.data:
-                profile = row.get("profile", {})
-                tool_name = profile.get("tool_name", "").lower()
-                repo = row["repo_name"].lower()
-                repo_short = repo.split("/")[-1].lower()
+        db = get_db()
+        docs = db.collection("tool_profiles").stream()
+        for doc in docs:
+            row = doc.to_dict()
+            profile = row.get("profile", {})
+            repo_name = row.get("repo_name", "")
+            tool_name = profile.get("tool_name", "").lower()
+            repo_short = repo_name.split("/")[-1].lower()
 
-                if tool_name and tool_name in all_text:
-                    return row["repo_name"]
-                if repo_short in all_text:
-                    return row["repo_name"]
+            if tool_name and tool_name in all_text:
+                return repo_name
+            if repo_short in all_text:
+                return repo_name
     except Exception:
         pass
     return None

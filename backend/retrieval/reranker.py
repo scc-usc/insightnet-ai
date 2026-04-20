@@ -11,29 +11,13 @@ import logging
 import os
 from datetime import datetime, timezone
 
-import numpy as np
-
 from infra import openai_client
-from infra.db import col_profiles, col_readme, col_code
 from models import RankedResult
 
 logger = logging.getLogger(__name__)
 
 JUDGE_CACHE_FILE = "judge_cache.json"
 CACHE_TTL = 86400  # 24 hours
-
-COLLECTION_MAP = {
-    "tool_profiles": col_profiles,
-    "readme_chunks": col_readme,
-    "code_chunks": col_code,
-}
-
-
-def _cosine(a: list[float], b: list[float]) -> float:
-    a_arr, b_arr = np.array(a), np.array(b)
-    dot = np.dot(a_arr, b_arr)
-    norm = np.linalg.norm(a_arr) * np.linalg.norm(b_arr)
-    return float(dot / norm) if norm else 0.0
 
 
 def _load_cache() -> dict:
@@ -51,28 +35,9 @@ def _save_cache(cache: dict):
 # ── Stage A: cosine re-score ─────────────────────────────────────────
 
 def cosine_rerank(query_emb: list[float], results: list[RankedResult], top_n: int = 10) -> list[RankedResult]:
-    scored = []
-    for r in results:
-        col = COLLECTION_MAP.get(r.source_collection)
-        if col is None:
-            scored.append((r, 0.0))
-            continue
-        try:
-            stored = col.get(where={"repo_name": r.repo_name}, include=["embeddings"])
-            if stored["embeddings"]:
-                sim = max(_cosine(query_emb, emb) for emb in stored["embeddings"])
-                scored.append((r, sim))
-            else:
-                scored.append((r, 0.0))
-        except Exception:
-            scored.append((r, 0.0))
-
-    scored.sort(key=lambda x: x[1], reverse=True)
-    out = []
-    for r, sim in scored[:top_n]:
-        r.score = sim
-        out.append(r)
-    return out
+    # Firestore vector_search already scores by cosine similarity — sort and trim.
+    sorted_results = sorted(results, key=lambda r: r.score, reverse=True)
+    return sorted_results[:top_n]
 
 
 # ── Stage B: o3 judge ────────────────────────────────────────────────
