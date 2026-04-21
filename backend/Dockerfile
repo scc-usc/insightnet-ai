@@ -1,22 +1,16 @@
-# syntax=docker/dockerfile:1
-FROM python:3.12-slim
-
-# Keeps Python from generating .pyc files and enables log flushing
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install dependencies first (layer-cached unless requirements change)
+# Install dependencies first (cached layer)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy source
+# Copy application code
 COPY . .
 
-# Cloud Run injects PORT; default to 8080
+# Cloud Run injects $PORT at runtime
 ENV PORT=8080
+EXPOSE 8080
 
-# Use gunicorn + uvicorn workers for production concurrency
-# Adjust --workers based on Cloud Run CPU allocation (1 CPU → 1-2 workers)
-CMD ["sh", "-c", "uvicorn infra.server:app --host 0.0.0.0 --port $PORT --workers 2"]
+CMD ["sh", "-c", "uvicorn infra.server:app --host 0.0.0.0 --port $PORT"]

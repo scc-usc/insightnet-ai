@@ -13,7 +13,7 @@ from models import QueryPlan
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You analyze user messages for InsightNet, an assistant for epidemic modeling tools.
+SYSTEM_PROMPT = """You analyze user messages for InsightNet AI, an assistant for epidemic modeling tools.
 
 You receive the user's message AND conversation history. The history may include [Previously shown tools: ...] annotations showing what tools were already presented to the user.
 
