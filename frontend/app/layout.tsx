@@ -11,7 +11,7 @@ const defaultUrl = process.env.VERCEL_URL
 
 export const metadata: Metadata = {
   metadataBase: new URL(defaultUrl),
-  title: "Insight Net Assistant",
+  title: "Insight Net AI",
   description: "AI Assistant for Insight Net users",
   icons: {
     icon: "/logo.png",

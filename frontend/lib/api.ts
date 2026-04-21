@@ -1,7 +1,7 @@
 import { Message, ToolCard } from "./types"
 import { getIdToken } from "./firebase/auth"
 
-const API_BASE = "/api"
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "")
 
 /** Returns Authorization header if a Firebase token is available. */
 async function authHeaders(): Promise<Record<string, string>> {
@@ -21,7 +21,6 @@ export async function queryStream(
   history: Message[],
   callbacks: StreamCallbacks,
   signal?: AbortSignal,
-  model?: string
 ): Promise<void> {
   const auth = await authHeaders()
   const res = await fetch(`${API_BASE}/query`, {
@@ -30,7 +29,6 @@ export async function queryStream(
     body: JSON.stringify({
       query,
       history: history.map(m => ({ role: m.role, content: m.content })),
-      model: model || undefined,
     }),
     signal,
   })
@@ -140,18 +138,5 @@ export async function ingestAll(): Promise<{ status: string; results: unknown[] 
 export async function healthCheck(): Promise<{ firestore: string; openrouter: string }> {
   const res = await fetch(`${API_BASE}/health`)
   if (!res.ok) throw new Error(`Health check failed: ${res.status}`)
-  return res.json()
-}
-
-export type ModelInfo = {
-  id: string
-  name: string
-  pricing: { prompt: string; completion: string }
-}
-
-export async function fetchModels(): Promise<ModelInfo[]> {
-  const auth = await authHeaders()
-  const res = await fetch(`${API_BASE}/models`, { headers: { ...auth } })
-  if (!res.ok) throw new Error(`Models fetch failed: ${res.status}`)
   return res.json()
 }

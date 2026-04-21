@@ -5,8 +5,9 @@
     }
   },
   "rewrites": [
-    { "source": "/api/query", "destination": "https://insightnet-production.up.railway.app/query" },
-    { "source": "/api/ingest", "destination": "https://insightnet-production.up.railway.app/ingest" },
-    { "source": "/api/health", "destination": "https://insightnet-production.up.railway.app/health" }
+    { "source": "/api/query", "destination": "https://insightnet-ai-932354682537.us-central1.run.app/query" },
+    { "source": "/api/ingest", "destination": "https://insightnet-ai-932354682537.us-central1.run.app/ingest" },
+    { "source": "/api/health", "destination": "https://insightnet-ai-932354682537.us-central1.run.app/health" },
+    { "source": "/api/model", "destination": "https://insightnet-ai-932354682537.us-central1.run.app/model" }
   ]
 }

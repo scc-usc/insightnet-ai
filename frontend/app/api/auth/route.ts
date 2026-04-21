@@ -1,33 +1,6 @@
-import { NextRequest, NextResponse } from "next/server"
+// Password gate removed — auth is handled by Firebase anonymous sign-in.
+export const dynamic = "force-static"
 
-export async function POST(request: NextRequest) {
-  const { password } = await request.json()
-  const sitePassword = process.env.SITE_PASSWORD
-
-  if (!sitePassword) {
-    // No password configured — allow access
-    const res = NextResponse.json({ ok: true })
-    res.cookies.set("insightnet-auth", "1", {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 60 * 60 * 24 * 30, // 30 days
-      path: "/",
-    })
-    return res
-  }
-
-  if (password === sitePassword) {
-    const res = NextResponse.json({ ok: true })
-    res.cookies.set("insightnet-auth", "1", {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 60 * 60 * 24 * 30, // 30 days
-      path: "/",
-    })
-    return res
-  }
-
-  return NextResponse.json({ error: "wrong password" }, { status: 401 })
+export async function GET() {
+  return new Response(null, { status: 204 })
 }

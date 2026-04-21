@@ -116,7 +116,7 @@ export default function ChatMessage({ message, isLastAssistant, isStreaming, onF
       </div>
       <div className="flex-1 min-w-0 space-y-2">
         <div className="flex items-center justify-between gap-2">
-          <p className="text-xs font-semibold text-[#314158]/50">InsightNet</p>
+          <p className="text-xs font-semibold text-[#314158]/50">Insight Net AI</p>
           {canShowCopy && <MessageCopyButton text={displayContent} />}
         </div>
 
